@@ -21,6 +21,7 @@ Installs required libs - run `.\.venv\Scripts\Activate.ps1` in powershell to act
 
 
 ## Required libraries 
+A list of required libraries can be found in the `requirements.txt` file. 
 [`pymodbus`](https://pymodbus.readthedocs.io/en/latest/): allows for modbus functionality 
 
 ## To do
