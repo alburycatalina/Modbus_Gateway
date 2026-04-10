@@ -17,7 +17,7 @@ The Modbus registers we are polling on are:
 
 ## Virtual environment 
 
-Installs required libs - run `.\.venv\Scripts\Activate.ps1` in powershell to activate venv. 
+Installs required libs - run `.\modbusvenv\Scripts\Activate.ps1` in powershell to activate venv. 
 
 
 ## Required libraries 
@@ -26,3 +26,5 @@ A list of required libraries can be found in the `requirements.txt` file.
 
 ## To do
 [] Make it so that this script is applied to all of my working devices
+[] Write a script that tests which port counts are coming through on
+[] front end for the gateway??
