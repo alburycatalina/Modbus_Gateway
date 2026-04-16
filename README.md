@@ -1,12 +1,8 @@
 # Mobus Gateway for ADAM 6051
 
-Need to write gateway for Modbus/TCP to TagoTiP over TCP for process below:
+This script is a gateway for ADAM 6051 devices which transmits Modbus/TCP to TagoTiP over TCP for process below:
 
-ADAM-6051 (Modbus/TCP)
-      ↕  port 502
-  Gateway Script
-      ↕  TagoTiP over TCP
-TagoIO (tcp.tip.us-e1.tago.io:5693)
+ADAM-6051 (Modbus/TCP) <- port 502 -> Gateway Script <-TagoTiP over TCP -> TagoIO (tcp.tip.us-e1.tago.io:5693)
 
 The ADAM-6051 has 12 digital inputs, 2 counter channels, and 2 digital outputs with 2000 VDC isolation. All digital inputs have a latch function and can be used as counter/frequency input channels. Advantech All of these are readable over Modbus/TCP on port 502.
 The Modbus registers we are polling on are:
@@ -14,24 +10,20 @@ The Modbus registers we are polling on are:
 * Digital inputs (DI0–DI11) — Coils at address 0x0000 onward
 * Counter values — Holding registers (32-bit, split into low/high word pairs)
 * Digital outputs (DO0–DO1) — Coils readable/writable
+
 ## About working with the script
 
-List of pollees, their IP address
+* `pollees.csv` contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. 
+
+
 ### Virtual environment 
 
-Installs required libs - run `.\modbusvenv\Scripts\Activate.ps1` in powershell to activate venv. 
+Installs required libs - run `.\modbusvenv\Scripts\Activate.ps1` in powershell to activate venv. This creates isolated directory on your computer that contains its own Python executable and pip libraries, avoiding package conflicts and version issues. 
 
 
 ### Required libraries 
 A list of required libraries can be found in the `requirements.txt` file. 
 [`pymodbus`](https://pymodbus.readthedocs.io/en/latest/): allows for modbus functionality 
-
-## To do
-[] Make it so that this script is applied to all of my working devices
-[] Write a script that tests which port counts are coming through on
-[] front end for the gateway??
-
-
 
 ## About Working with ADAM devices
 
