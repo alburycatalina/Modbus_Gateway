@@ -14,7 +14,7 @@ The Modbus registers we are polling on are:
 ## About working with the script
 
 * `pollees.csv` contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. 
-
+* `.env` contains hash code for talking to Tago. [More here.](https://docs.tago.io/docs/tagoio/devices/device-token)
 
 ### Virtual environment 
 
@@ -22,7 +22,7 @@ Installs required libs - run `.\modbusvenv\Scripts\Activate.ps1` in powershell t
 
 
 ### Required libraries 
-A list of required libraries can be found in the `requirements.txt` file. 
+A list of required libraries can be found in the `requirements.txt` file. Install required packages with `pip install -r requirements.txt`
 [`pymodbus`](https://pymodbus.readthedocs.io/en/latest/): allows for modbus functionality 
 
 ## About Working with ADAM devices
