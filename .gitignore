@@ -1,5 +1,6 @@
 # file with tago auth 
 .env
+pollees.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
