@@ -129,7 +129,7 @@ try:
                     continue
 
                 freq = reg_result.registers[0]
-                frame = f"PUSH|{AUTH_HASH}|{serial}|[countfreq:={freq}#Hz]\n"
+                frame = f"PUSH|{AUTH_HASH}|{serial}|[countfreq:={freq}]\n"
                 ack = send_frame(tago_socket, frame)
                 log.info(f"[{name}] Sent: {frame.strip()}")
                 log.info(f"[{name}] ACK:  {ack}")
