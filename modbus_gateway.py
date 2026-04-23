@@ -11,8 +11,9 @@ import os
 load_dotenv()
 AUTH_HASH = os.getenv("AUTH_HASH")
 ADAM_PORT = 502
-POLL_INTERVAL = 10 # poll every 20 secs
+POLL_INTERVAL = 20 # poll every 20 secs
 PING_INTERVAL = 30 # ping every 30 secs
+RECONNECT_INTERVAL = 10
 TAGO_HOST = "tcp.tip.us-e1.tago.io"
 TAGO_PORT = 5693
 DEVICES_FILE = "pollees.csv"
@@ -77,6 +78,8 @@ devices = load_devices(DEVICES_FILE)
 for device in devices:
     device["modbus"] = connect_modbus(device["ip"], device["name"])
     device["last_ping"] = time.time()
+    device["tago_socket"] = connect_tago() # give each device own tago socket 
+    device["last_reconnect"] = time.time()
 
 tago_socket = connect_tago()
 
@@ -84,12 +87,23 @@ try:
     while True:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # At startup, give each device its own TagoIO socket
         for device in devices:
             name   = device["name"]
             serial = device["serial"]
             client = device["modbus"]
+            tago_socket = device["tago_socket"]
 
             try:
+                # Force proactive reconnect every 12 hours
+                if time.time() - device["last_reconnect"] >= RECONNECT_INTERVAL:
+                    log.info(f"[{name}] Scheduled reconnect to TagoIO...")
+                    tago_socket.close()
+                    device["tago_socket"] = connect_tago()
+                    tago_socket = device["tago_socket"]
+                    device["last_reconnect"] = time.time()
+                    device["last_ping"] = time.time()
+
                 # Send PING if due
                 if time.time() - device["last_ping"] >= PING_INTERVAL:
                     ping_frame = f"PING|{AUTH_HASH}|{serial}\n"
@@ -97,35 +111,43 @@ try:
                     log.info(f"[{name}] PING: {ack}")
                     device["last_ping"] = time.time()
 
-                    # Read from ADAM and send to TagoIO
-                    reg_result = client.read_holding_registers(address=0x0018, count=1)
+                    if "keep_alive_timeout" in ack or "ERR" in ack:
+                        log.warning(f"[{name}] keep_alive_timeout — reconnecting...")
+                        tago_socket.close()
+                        device["tago_socket"] = connect_tago()
+                        tago_socket = device["tago_socket"]
+                        device["last_reconnect"] = time.time()
+                        device["last_ping"] = time.time()
+                        continue
 
-                    if reg_result is None or reg_result.isError():
-                        log.warning(f"[{name}] Modbus read failed — reconnecting...")
-                        client.close()
-                        device["modbus"] = connect_modbus(device["ip"], name)
-                        continue  # Skip to next device, try again next poll cycle
+                # Read from ADAM and send to TagoIO
+                reg_result = client.read_holding_registers(address=0x0018, count=1)
+                if reg_result is None or reg_result.isError():
+                    log.warning(f"[{name}] Modbus read failed — reconnecting...")
+                    client.close()
+                    device["modbus"] = connect_modbus(device["ip"], name)
+                    continue
 
-                    freq = reg_result.registers[0]
-                    frame = f"PUSH|{AUTH_HASH}|{serial}|[countfreq:={freq}]\n"
-                    ack = send_frame(tago_socket, frame)
-                    log.info(f"[{name}] Sent: {frame.strip()}")
-                    log.info(f"[{name}] ACK:  {ack}")
+                freq = reg_result.registers[0]
+                frame = f"PUSH|{AUTH_HASH}|{serial}|[countfreq:={freq}#Hz]\n"
+                ack = send_frame(tago_socket, frame)
+                log.info(f"[{name}] Sent: {frame.strip()}")
+                log.info(f"[{name}] ACK:  {ack}")
 
             except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError) as e:
-                log.error(f"[{timestamp}] TagoIO connection lost ({e}) — reconnecting...")
+                log.error(f"[{name}] TagoIO connection lost ({e}) — reconnecting...")
                 tago_socket.close()
-                tago_socket = connect_tago()
-                last_reconnect = time.time()
+                device["tago_socket"] = connect_tago()
+                device["last_reconnect"] = time.time()
                 device["last_ping"] = time.time()
 
             except (ModbusException, ConnectionException) as e:
-                log.error(f"[{timestamp}] [{name}] Modbus connection lost ({e}) — reconnecting...")
+                log.error(f"[{name}] Modbus connection lost ({e}) — reconnecting...")
                 client.close()
                 device["modbus"] = connect_modbus(device["ip"], name)
 
             except Exception as e:
-                log.error(f"[{timestamp}] [{name}] Unexpected error ({e}) — reconnecting Modbus...")
+                log.error(f"[{name}] Unexpected error ({e})")
                 client.close()
                 device["modbus"] = connect_modbus(device["ip"], name)
 
@@ -133,8 +155,9 @@ try:
 
 except KeyboardInterrupt:
     log.info("Stopping — KeyboardInterrupt received.")
+
 finally:
     for device in devices:
         device["modbus"].close()
-    tago_socket.close()
-    log.info("Disconnected.")
+        device["tago_socket"].close()
+    log.info("Disconnected")
