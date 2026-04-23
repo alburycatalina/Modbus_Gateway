@@ -59,6 +59,7 @@ def connect_tago():
     while True:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(None)
             sock.connect((TAGO_HOST, TAGO_PORT))
             log.info("Connected to TagoIO")
             return sock
