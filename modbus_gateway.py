@@ -4,14 +4,15 @@ import csv
 import logging
 from datetime import datetime
 from pymodbus.client import ModbusTcpClient
+from pymodbus.exceptions import ModbusException, ConnectionException
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 AUTH_HASH = os.getenv("AUTH_HASH")
 ADAM_PORT = 502
-POLL_INTERVAL = 20 # poll every 20 secs
-PING_INTERVAL = 10 # ping every 10 secs
+POLL_INTERVAL = 10 # poll every 20 secs
+PING_INTERVAL = 30 # ping every 30 secs
 TAGO_HOST = "tcp.tip.us-e1.tago.io"
 TAGO_PORT = 5693
 DEVICES_FILE = "pollees.csv"
@@ -71,9 +72,6 @@ def send_frame(sock, frame):
     return sock.recv(1024).decode().strip()
 
 # Load devices and connect to all of them
-# FIXME devices are not reloaded if connection is lost as this function is not in the below loop
-# Need to create an error message when device does not report 
-# Need to periodically check if devices are connected and reconnect if not
 devices = load_devices(DEVICES_FILE)
 for device in devices:
     device["modbus"] = connect_modbus(device["ip"], device["name"])
@@ -98,27 +96,35 @@ try:
                     log.info(f"[{name}] PING: {ack}")
                     device["last_ping"] = time.time()
 
-                # Read from ADAM and send to TagoIO
-                reg_result = client.read_holding_registers(address=0x0018, count=1)  # Fix me
-                if not reg_result.isError():
+                    # Read from ADAM and send to TagoIO
+                    reg_result = client.read_holding_registers(address=0x0018, count=1)
+
+                    if reg_result is None or reg_result.isError():
+                        log.warning(f"[{name}] Modbus read failed — reconnecting...")
+                        client.close()
+                        device["modbus"] = connect_modbus(device["ip"], name)
+                        continue  # Skip to next device, try again next poll cycle
+
                     freq = reg_result.registers[0]
                     frame = f"PUSH|{AUTH_HASH}|{serial}|[countfreq:={freq}]\n"
                     ack = send_frame(tago_socket, frame)
                     log.info(f"[{name}] Sent: {frame.strip()}")
                     log.info(f"[{name}] ACK:  {ack}")
-                else:
-                    log.error(f"[{name}] Error reading ADAM: {reg_result}")
 
-            except ( ) as e:
-# bring in error message - if not connected - reconnect !
             except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError) as e:
-                log.error(f"TagoIO connection lost: {e} — reconnecting...")
+                log.error(f"[{timestamp}] TagoIO connection lost ({e}) — reconnecting...")
                 tago_socket.close()
                 tago_socket = connect_tago()
+                last_reconnect = time.time()
                 device["last_ping"] = time.time()
 
+            except (ModbusException, ConnectionException) as e:
+                log.error(f"[{timestamp}] [{name}] Modbus connection lost ({e}) — reconnecting...")
+                client.close()
+                device["modbus"] = connect_modbus(device["ip"], name)
+
             except Exception as e:
-                log.error(f"[{name}] Modbus error: {e} — reconnecting...")
+                log.error(f"[{timestamp}] [{name}] Unexpected error ({e}) — reconnecting Modbus...")
                 client.close()
                 device["modbus"] = connect_modbus(device["ip"], name)
 
