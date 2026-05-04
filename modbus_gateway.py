@@ -54,19 +54,39 @@ def connect_modbus(ip, name):
         log.warning(f"Failed to connect to ADAM [{name}] at {ip} — retrying in 5s")
         time.sleep(5)
 
-# Create tago socket connection
-def connect_tago():
-    """Create and return a fresh TagoIO socket connection."""
+# create tago socket connection
+def connect_tago(device_name=""):
+    """Create and return a fresh TagoIO socket, retrying indefinitely."""
+    attempt = 0
     while True:
+        attempt += 1
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(None)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+            sock.settimeout(10)
             sock.connect((TAGO_HOST, TAGO_PORT))
-            log.info("Connected to TagoIO")
+            log.info(f"[{device_name}] Connected to TagoIO (attempt {attempt})")
             return sock
         except Exception as e:
-            log.warning(f"Failed to connect to TagoIO: {e} — retrying in 5s")
-            time.sleep(5)
+            wait = min(30, 5 * attempt)  # Back off up to 30s
+            log.warning(f"[{device_name}] TagoIO connect failed ({e}) — retrying in {wait}s")
+            time.sleep(wait)
+
+# close and reconnect if needed
+def reconnect_tago(device):
+    """Safely close and reconnect a device's TagoIO socket."""
+    name = device["name"]
+    try:
+        device["tago_socket"].close()
+    except Exception:
+        pass  # Already dead, ignore
+    device["tago_socket"] = connect_tago(name)
+    device["last_reconnect"] = time.time()
+    device["last_ping"] = time.time()
+    device["consecutive_errors"] = 0
 
 def send_frame(sock, frame):
     """Send a frame and return the ACK response."""
@@ -75,11 +95,15 @@ def send_frame(sock, frame):
 
 # Load devices and connect to all of them
 devices = load_devices(DEVICES_FILE)
+
+
 for device in devices:
     device["modbus"] = connect_modbus(device["ip"], device["name"])
     device["last_ping"] = time.time()
-    device["tago_socket"] = connect_tago() # give each device own tago socket 
+    device["tago_socket"] = connect_tago(device["name"])
     device["last_reconnect"] = time.time()
+    device["consecutive_errors"] = 0 # At startup, initialise error counter per device
+    device["cooldown_until"] = 0  # Timestamp — skip device until this time
 
 tago_socket = connect_tago()
 
@@ -87,71 +111,83 @@ try:
     while True:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # At startup, give each device its own TagoIO socket
         for device in devices:
             name   = device["name"]
             serial = device["serial"]
             client = device["modbus"]
-            tago_socket = device["tago_socket"]
 
-            try:
-                # Force proactive reconnect every 12 hours
-                if time.time() - device["last_reconnect"] >= RECONNECT_INTERVAL:
-                    log.info(f"[{name}] Scheduled reconnect to TagoIO...")
-                    tago_socket.close()
-                    device["tago_socket"] = connect_tago()
-                    tago_socket = device["tago_socket"]
-                    device["last_reconnect"] = time.time()
-                    device["last_ping"] = time.time()
+        # Skip device if it's in cooldown
+        if time.time() < device["cooldown_until"]:
+            remaining = device["cooldown_until"] - time.time()
+            log.info(f"[{name}] In cooldown — {remaining:.0f}s remaining, skipping...")
+            continue
 
-                # Send PING if due
-                if time.time() - device["last_ping"] >= PING_INTERVAL:
-                    ping_frame = f"PING|{AUTH_HASH}|{serial}\n"
-                    ack = send_frame(tago_socket, ping_frame)
-                    log.info(f"[{name}] PING: {ack}")
-                    device["last_ping"] = time.time()
+        # Refresh local reference to tago_socket each iteration
+        tago_socket = device["tago_socket"]
 
-                    if "keep_alive_timeout" in ack or "ERR" in ack:
-                        log.warning(f"[{name}] keep_alive_timeout — reconnecting...")
-                        tago_socket.close()
-                        device["tago_socket"] = connect_tago()
-                        tago_socket = device["tago_socket"]
-                        device["last_reconnect"] = time.time()
-                        device["last_ping"] = time.time()
-                        continue
+        try:
+            # Force proactive reconnect every 12 hours
+            if time.time() - device["last_reconnect"] >= RECONNECT_INTERVAL:
+                log.info(f"[{name}] Scheduled reconnect...")
+                reconnect_tago(device)
+                tago_socket = device["tago_socket"]
 
-                # Read from ADAM and send to TagoIO
-                reg_result = client.read_holding_registers(address=0x0018, count=1)
-                if reg_result is None or reg_result.isError():
-                    log.warning(f"[{name}] Modbus read failed — reconnecting...")
-                    client.close()
-                    device["modbus"] = connect_modbus(device["ip"], name)
-                    continue
-
-                freq = reg_result.registers[0]
-                frame = f"PUSH|{AUTH_HASH}|{serial}|[countfreq:={freq}]\n"
-                ack = send_frame(tago_socket, frame)
-                log.info(f"[{name}] Sent: {frame.strip()}")
-                log.info(f"[{name}] ACK:  {ack}")
-
-            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError) as e:
-                log.error(f"[{name}] TagoIO connection lost ({e}) — reconnecting...")
-                tago_socket.close()
-                device["tago_socket"] = connect_tago()
-                device["last_reconnect"] = time.time()
+            # Send PING if due
+            if time.time() - device["last_ping"] >= PING_INTERVAL:
+                ping_frame = f"PING|{AUTH_HASH}|{serial}\n"
+                ack = send_frame(tago_socket, ping_frame)
+                log.info(f"[{name}] PING: {ack}")
                 device["last_ping"] = time.time()
 
-            except (ModbusException, ConnectionException) as e:
-                log.error(f"[{name}] Modbus connection lost ({e}) — reconnecting...")
+                if "ERR" in ack:
+                    log.warning(f"[{name}] PING error ({ack}) — reconnecting...")
+                    reconnect_tago(device)
+                    tago_socket = device["tago_socket"]
+                    continue
+
+            # Read from ADAM
+            reg_result = client.read_holding_registers(address=0x0018, count=1)
+            if reg_result is None or reg_result.isError():
+                log.warning(f"[{name}] Modbus read failed — reconnecting Modbus...")
                 client.close()
                 device["modbus"] = connect_modbus(device["ip"], name)
+                continue
 
-            except Exception as e:
-                log.error(f"[{name}] Unexpected error ({e})")
-                client.close()
-                device["modbus"] = connect_modbus(device["ip"], name)
+            # Send to TagoIO
+            freq = reg_result.registers[0]
+            frame = f"PUSH|{AUTH_HASH}|{serial}|[countfreq:={freq}]\n"
+            ack = send_frame(tago_socket, frame)
+            log.info(f"[{name}] Sent: {frame.strip()}")
+            log.info(f"[{name}] ACK:  {ack}")
 
-        time.sleep(POLL_INTERVAL)
+            # Reset error counter on success
+            device["consecutive_errors"] = 0
+
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError) as e:
+            device["consecutive_errors"] += 1
+            log.error(f"[{name}] TagoIO connection lost ({e}) — error #{device['consecutive_errors']}")
+
+            if device["consecutive_errors"] >= 5:
+                cooldown = 60  # 60s cooldown after 5 consecutive failures
+                device["cooldown_until"] = time.time() + cooldown
+                device["consecutive_errors"] = 0
+                log.warning(f"[{name}] Too many errors — cooling down for {cooldown}s")
+            else:
+                reconnect_tago(device)
+                tago_socket = device["tago_socket"]
+
+        except (ModbusException, ConnectionException) as e:
+            log.error(f"[{name}] Modbus connection lost ({e}) — reconnecting...")
+            client.close()
+            device["modbus"] = connect_modbus(device["ip"], name)
+
+        except Exception as e:
+            log.error(f"[{name}] Unexpected error ({e})")
+            device["consecutive_errors"] += 1
+            reconnect_tago(device)
+            tago_socket = device["tago_socket"]
+
+            time.sleep(POLL_INTERVAL)
 
 except KeyboardInterrupt:
     log.info("Stopping — KeyboardInterrupt received.")
