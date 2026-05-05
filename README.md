@@ -7,23 +7,23 @@ ADAM-6051 (Modbus/TCP) <- port 502 -> Gateway Script <-TagoTiP over TCP -> TagoI
 The ADAM-6051 has 12 digital inputs, 2 counter channels, and 2 digital outputs with 2000 VDC isolation. All digital inputs have a latch function and can be used as counter/frequency input channels. Advantech All of these are readable over Modbus/TCP on port 502.
 The Modbus registers we are polling on are:
 
-* Digital inputs (DI0–DI11) — Coils at address 0x0000 onward
-* Counter values — Holding registers (32-bit, split into low/high word pairs)
-* Digital outputs (DO0–DO1) — Coils readable/writable
+- Digital inputs (DI0–DI11) — Coils at address 0x0000 onward
+- Counter values — Holding registers (32-bit, split into low/high word pairs)
+- Digital outputs (DO0–DO1) — Coils readable/writable
 
 ## About working with the script
 
-* `pollees.csv` contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. 
-* `.env` contains hash code for talking to Tago. [More here.](https://docs.tago.io/docs/tagoio/devices/device-token)
+- `pollees.csv` contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. See pollees.example.csv for an example. 
+- `.env` contains hash code for talking to Tago. [More here.](https://docs.tago.io/docs/tagoio/devices/device-token)
 
-### Virtual environment 
+### Virtual environment
 
 Installs required libs - run `.\modbusvenv\Scripts\Activate.ps1` in powershell to activate venv. This creates isolated directory on your computer that contains its own Python executable and pip libraries, avoiding package conflicts and version issues. 
 
+### Required libraries
 
-### Required libraries 
 A list of required libraries can be found in the `requirements.txt` file. Install required packages with `pip install -r requirements.txt`
-[`pymodbus`](https://pymodbus.readthedocs.io/en/latest/): allows for modbus functionality 
+`[pymodbus](https://pymodbus.readthedocs.io/en/latest/)`: allows for modbus functionality 
 
 ## About Working with ADAM devices
 

@@ -2,6 +2,7 @@ import time
 import socket
 import csv
 import threading
+import random
 from datetime import datetime
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException, ConnectionException
@@ -12,14 +13,21 @@ import logging
 # Set variables
 load_dotenv()
 AUTH_HASH = os.getenv("AUTH_HASH")
+if not AUTH_HASH: # if AUTH_HASH is not set, raise an error
+    raise RuntimeError("Missing AUTH_HASH in environment/.env")
 ADAM_PORT = 502
 POLL_INTERVAL = 10
 PING_INTERVAL = 20
-RECONNECT_INTERVAL = 3600 * 12
-TAGO_HOST = "tcp.tip.us-e1.tago.io"
-TAGO_PORT = 5693
-DEVICES_FILE = "pollees.csv"
-LOG_FILE = "poller.log"
+RECONNECT_INTERVAL = 3600 # attempt to reconnect every hour
+TAGO_HOST = "tcp.tip.us-e1.tago.io" # TagoIO host
+TAGO_PORT = 5693 # TagoIO port1
+DEVICES_FILE = "pollees.csv" # list of devices to poll
+LOG_FILE = "poller.log" # lof of warnings and frames sent/received
+POLL_REGISTER_ADDRESS = 0x0018
+POLL_REGISTER_COUNT = 1
+TAGO_VARIABLE_NAME = "countfreq"
+RECONNECT_BACKOFF_BASE = 1
+RECONNECT_BACKOFF_CAP = 30
 
 
 # Create file that logs output
@@ -39,14 +47,67 @@ log.addHandler(file_handler)
 
 
 def load_devices(filepath):
+    def parse_int(value, default):
+        if value is None:
+            return default
+        text = str(value).strip()
+        if not text:
+            return default
+        return int(text, 0)
+
+    def parse_register_points(row):
+        # Format:
+        # registers=variable:address[:count];variable2:address[:count]
+        # Examples:
+        # countfreq:0x18
+        # countfreq:0x18:1;temp:0x20:2
+        text = (row.get("registers") or "").strip()
+        if not text:
+            return [{
+                "variable": (row.get("variable_name") or TAGO_VARIABLE_NAME).strip(),
+                "address": parse_int(row.get("register_address"), POLL_REGISTER_ADDRESS),
+                "count": parse_int(row.get("register_count"), POLL_REGISTER_COUNT),
+            }]
+
+        points = []
+        for raw_part in text.split(";"):
+            part = raw_part.strip()
+            if not part:
+                continue
+            pieces = [p.strip() for p in part.split(":")]
+            if len(pieces) not in (2, 3):
+                raise ValueError(
+                    f"Invalid registers entry '{part}'. "
+                    "Expected variable:address[:count]"
+                )
+            variable = pieces[0]
+            address = int(pieces[1], 0)
+            count = int(pieces[2], 0) if len(pieces) == 3 else 1
+            points.append({
+                "variable": variable,
+                "address": address,
+                "count": count,
+            })
+
+        if not points:
+            raise ValueError("registers field was provided but no valid entries were found")
+        return points
+
     devices = []
     with open(filepath, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            register_points = parse_register_points(row)
             devices.append({
                 "name":   row["name"],
                 "ip":     row["ip"],
                 "serial": row["serial"],
+                # Optional per-device overrides in pollees.csv:
+                # register_address, register_count, variable_name
+                "register_address": parse_int(row.get("register_address"), POLL_REGISTER_ADDRESS),
+                "register_count": parse_int(row.get("register_count"), POLL_REGISTER_COUNT),
+                "variable_name": (row.get("variable_name") or TAGO_VARIABLE_NAME).strip(),
+                "register_points": register_points,
             })
     log.info(f"Loaded {len(devices)} device(s) from {filepath}")
     return devices
@@ -67,9 +128,19 @@ def connect_tago(name=""):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+            # Socket keepalive options
+            for opt_name, opt_value in (
+                ("TCP_KEEPIDLE", 30), # idle time (seconds) before sending keepalive probe
+                ("TCP_KEEPINTVL", 5), # interval (seconds) between keepalive probes
+                ("TCP_KEEPCNT", 3), # number of keepalive probes to send before considering the connection dead
+            ):
+                opt = getattr(socket, opt_name, None)
+                if opt is None:
+                    continue
+                try:
+                    sock.setsockopt(socket.IPPROTO_TCP, opt, opt_value)
+                except OSError as e:
+                    log.warning(f"[{name}] Keepalive option {opt_name} unsupported ({e})")
             sock.settimeout(10)
             sock.connect((TAGO_HOST, TAGO_PORT))
             log.info(f"[{name}] Connected to TagoIO (attempt {attempt})")
@@ -79,9 +150,17 @@ def connect_tago(name=""):
             log.warning(f"[{name}] TagoIO connect failed ({e}) — retrying in {wait}s")
             time.sleep(wait)
 
-def send_frame(sock, frame):
+def send_frame(sock, frame, ack_timeout=8):
     sock.sendall(frame.encode())
-    return sock.recv(1024).decode().strip()
+    previous_timeout = sock.gettimeout()
+    try:
+        sock.settimeout(ack_timeout)
+        return sock.recv(1024).decode().strip()
+    except socket.timeout:
+        # Missing ACK is common on busy links; treat as soft failure.
+        return ""
+    finally:
+        sock.settimeout(previous_timeout)
 
 def reconnect_tago(device):
     name = device["name"]
@@ -92,12 +171,23 @@ def reconnect_tago(device):
     device["tago_socket"] = connect_tago(name)
     device["last_reconnect"] = time.time()
     device["last_ping"] = time.time()
-    device["consecutive_errors"] = 0
+
+# stops all devices from polling for a random amount of time to prevent overwhelming the server
+def sleep_reconnect_backoff(device):
+    errors = max(1, device.get("consecutive_errors", 1))
+    raw_delay = min(RECONNECT_BACKOFF_CAP, RECONNECT_BACKOFF_BASE * (2 ** (errors - 1)))
+    delay = random.uniform(raw_delay * 0.5, raw_delay) #jitter the delay to prevent all devices from reconnecting at the same time
+    log.info(
+        f"[{device['name']}] Reconnect backoff: sleeping {delay:.1f}s "
+        f"(errors={errors}, base={raw_delay}s)"
+    )
+    time.sleep(delay)
 
 def run_device(device):
     """Main polling loop for a single device — runs in its own thread."""
     name   = device["name"]
     serial = device["serial"]
+    register_points = device["register_points"]
 
     device["modbus"]           = connect_modbus(device["ip"], name)
     device["tago_socket"]      = connect_tago(name)
@@ -119,7 +209,7 @@ def run_device(device):
 
         try:
             # Proactive reconnect every 12 hours
-            if time.time() - device["last_reconnect"] >= RECONNECT_INTERVAL:
+            if time.time() - device["last_reconnect"] >= RECONNECT_INTERVAL: # if last reconnect was more than an hour ago, reconnect
                 log.info(f"[{name}] Scheduled reconnect...")
                 reconnect_tago(device)
                 tago_socket = device["tago_socket"]
@@ -127,35 +217,48 @@ def run_device(device):
             # PING if due
             if time.time() - device["last_ping"] >= PING_INTERVAL:
                 ping_frame = f"PING|{AUTH_HASH}|{serial}\n"
-                ack = send_frame(tago_socket, ping_frame)
-                log.info(f"[{name}] PING: {ack}")
+                ack = send_frame(tago_socket, ping_frame, ack_timeout=6)
+                log.info(f"[{name}] PING: {ack or '<no-ack>'}")
                 device["last_ping"] = time.time()
 
-                if "ERR" in ack:
+                if ack and "ERR" in ack:
                     log.warning(f"[{name}] PING error ({ack}) — reconnecting...")
                     reconnect_tago(device)
                     tago_socket = device["tago_socket"]
                     continue
 
-            # Read from ADAM
-            reg_result = client.read_holding_registers(address=0x0018, count=1)
-            if reg_result is None or reg_result.isError():
-                log.warning(f"[{name}] Modbus read failed — reconnecting Modbus...")
-                client.close()
-                device["modbus"] = connect_modbus(device["ip"], name)
-                continue
+            for point in register_points:
+                reg_result = client.read_holding_registers(
+                    address=point["address"],
+                    count=point["count"],
+                )
+                if reg_result is None or reg_result.isError():
+                    log.warning(
+                        f"[{name}] Modbus read failed for {point['variable']} "
+                        f"(address={point['address']}, count={point['count']}) "
+                        "— reconnecting Modbus..."
+                    )
+                    client.close()
+                    device["modbus"] = connect_modbus(device["ip"], name)
+                    break
 
-            # Send to TagoIO
-            freq = reg_result.registers[0]
-            frame = f"PUSH|{AUTH_HASH}|{serial}|[countfreq:={freq}]\n"
-            ack = send_frame(tago_socket, frame)
-            log.info(f"[{name}] Sent: {frame.strip()}")
-            log.info(f"[{name}] ACK:  {ack}")
-            device["consecutive_errors"] = 0
+                # Sends the first register from each read. If count > 1, combine words as needed per metric.
+                value = reg_result.registers[0]
+                frame = f"PUSH|{AUTH_HASH}|{serial}|[{point['variable']}:={value}]\n"
+                ack = send_frame(tago_socket, frame, ack_timeout=8)
+                log.info(f"[{name}] Sent: {frame.strip()}")
+                log.info(f"[{name}] ACK:  {ack or '<no-ack>'}")
+                if ack and "ERR" in ack:
+                    raise ConnectionAbortedError(f"TagoIO returned error ACK: {ack}")
+            else:
+                device["consecutive_errors"] = 0
 
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError) as e:
             device["consecutive_errors"] += 1
-            log.error(f"[{name}] TagoIO connection lost ({e}) — error #{device['consecutive_errors']}")
+            log.error(
+                f"[{name}] TagoIO connection lost "
+                f"({type(e).__name__}: {e}) — error #{device['consecutive_errors']}"
+            )
 
             if device["consecutive_errors"] >= 5:
                 cooldown = 60
@@ -163,6 +266,7 @@ def run_device(device):
                 device["consecutive_errors"] = 0
                 log.warning(f"[{name}] Too many errors — cooling down for {cooldown}s")
             else:
+                sleep_reconnect_backoff(device)
                 reconnect_tago(device)
                 tago_socket = device["tago_socket"]
 
@@ -174,6 +278,7 @@ def run_device(device):
         except Exception as e:
             log.error(f"[{name}] Unexpected error ({e})")
             device["consecutive_errors"] += 1
+            sleep_reconnect_backoff(device)
             reconnect_tago(device)
 
         time.sleep(POLL_INTERVAL)
