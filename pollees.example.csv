@@ -1,0 +1,3 @@
+name,ip,serial,registers
+adam-6051-a,EXAMPLE_IP,EXAMPLE_SERIAL_001,countfreq:0x18:1
+adam-6051-b,EXAMPLE_IP,EXAMPLE_SERIAL_002,countfreq:0x18:1;temp:0x20:1;rpm:0x22:1
