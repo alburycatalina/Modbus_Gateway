@@ -16,6 +16,45 @@ The Modbus registers we are polling on are:
 - [`pollees.csv`](/pollees.csv) contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. See [`pollees.example.csv`](/pollees.example.csv) for an example. 
 - `.env` contains hash code for talking to Tago. [More here.](https://docs.tago.io/docs/tagoio/devices/device-token). It is also not shared for sercurity purposes. For an example see [`.env.example`](/.env.example). 
 
+### `pollees.csv` format
+
+The script supports one or more register points per device.
+
+- Required columns: `name`, `ip`, `serial`
+- Preferred config column: `registers`
+- Legacy fallback columns still supported: `register_address`, `register_count`, `variable_name`
+
+`registers` format:
+
+- `variable:address[:count[:rollover_bits]];variable2:address[:count[:rollover_bits]]`
+- `address` can be hex (`0x18`) or decimal (`24`)
+- `count` defaults to `1`
+- `rollover_bits` defaults to `16 * count`
+
+Example:
+
+```csv
+name,ip,serial,registers
+adam-6051-a,192.168.1.50,EXAMPLE_SERIAL_001,countfreq:0x18:1:16
+adam-6051-b,192.168.1.51,EXAMPLE_SERIAL_002,countfreq:0x18:1:16;total_count:0x20:2:32
+```
+
+### Delta behavior and persisted state
+
+For each configured register point, the gateway sends:
+
+- Current value: `[variable:=value]`
+- Delta value: `[variable_delta:=delta]`
+
+How `delta` is calculated:
+
+- First sample after startup has no previous value, so `delta = 0`
+- Normal case: `delta = current - previous`
+- If value wraps and `rollover_bits` is configured, rollover math is applied
+- Negative values without a valid rollover are treated as reset/noise and sent as `0`
+
+Previous values are persisted in `last_values.json` so deltas continue across restarts.
+
 ### Required libraries
 
 A list of required libraries can be found in the `requirements.txt` file. Install required packages with `pip install -r requirements.txt`

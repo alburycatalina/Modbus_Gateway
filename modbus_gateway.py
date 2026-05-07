@@ -3,7 +3,7 @@ import socket
 import csv
 import threading
 import random
-from datetime import datetime
+import json
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException, ConnectionException
 from dotenv import load_dotenv
@@ -23,6 +23,7 @@ TAGO_HOST = "tcp.tip.us-e1.tago.io" # TagoIO host
 TAGO_PORT = 5693 # TagoIO port1
 DEVICES_FILE = "pollees.csv" # list of devices to poll
 LOG_FILE = "poller.log" # lof of warnings and frames sent/received
+LAST_VALUES_FILE = "last_values.json"
 POLL_REGISTER_ADDRESS = 0x0018
 POLL_REGISTER_COUNT = 1
 TAGO_VARIABLE_NAME = "countfreq"
@@ -44,6 +45,47 @@ file_handler.setFormatter(formatter)
 
 log.addHandler(file_handler)
 
+state_lock = threading.Lock()
+
+# Load last value from JSON file for calculating deltas
+def load_last_values_state(filepath):
+    if not os.path.exists(filepath):
+        return {}
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+        log.warning(f"State file {filepath} is not a JSON object. Starting with empty state.")
+        return {}
+    except Exception as e:
+        log.warning(f"Failed to load state file {filepath} ({e}). Starting with empty state.")
+        return {}
+
+# Save last value in count frequency to a json file
+def save_last_values_state(filepath, state):
+    temp_path = f"{filepath}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+    os.replace(temp_path, filepath)
+
+# Compute the delta between the current and previous value from value in JSON 
+def compute_delta(current_value, previous_value, rollover_bits):
+    if previous_value is None:
+        return 0
+
+    delta = current_value - previous_value
+    if delta >= 0:
+        return delta
+
+    if rollover_bits and rollover_bits > 0:
+        max_value = (1 << rollover_bits) - 1
+        if previous_value <= max_value and current_value <= max_value:
+            return (max_value - previous_value) + current_value + 1
+
+    # If negative and no valid rollover configuration, assume reset/noisy reading.
+    return 0
+
 
 
 def load_devices(filepath):
@@ -57,16 +99,18 @@ def load_devices(filepath):
 
     def parse_register_points(row):
         # Format:
-        # registers=variable:address[:count];variable2:address[:count]
+        # registers=variable:address[:count[:rollover_bits]];...
         # Examples:
         # countfreq:0x18
-        # countfreq:0x18:1;temp:0x20:2
+        # countfreq:0x18:1:16;total_count:0x20:2:32
         text = (row.get("registers") or "").strip()
         if not text:
+            default_count = parse_int(row.get("register_count"), POLL_REGISTER_COUNT)
             return [{
                 "variable": (row.get("variable_name") or TAGO_VARIABLE_NAME).strip(),
                 "address": parse_int(row.get("register_address"), POLL_REGISTER_ADDRESS),
-                "count": parse_int(row.get("register_count"), POLL_REGISTER_COUNT),
+                "count": default_count,
+                "rollover_bits": 16 * max(1, default_count),
             }]
 
         points = []
@@ -75,18 +119,20 @@ def load_devices(filepath):
             if not part:
                 continue
             pieces = [p.strip() for p in part.split(":")]
-            if len(pieces) not in (2, 3):
+            if len(pieces) not in (2, 3, 4):
                 raise ValueError(
                     f"Invalid registers entry '{part}'. "
-                    "Expected variable:address[:count]"
+                    "Expected variable:address[:count[:rollover_bits]]"
                 )
             variable = pieces[0]
             address = int(pieces[1], 0)
             count = int(pieces[2], 0) if len(pieces) == 3 else 1
+            rollover_bits = int(pieces[3], 0) if len(pieces) == 4 else 16 * max(1, count)
             points.append({
                 "variable": variable,
                 "address": address,
                 "count": count,
+                "rollover_bits": rollover_bits,
             })
 
         if not points:
@@ -195,6 +241,15 @@ def run_device(device):
     device["last_reconnect"]   = time.time()
     device["consecutive_errors"] = 0
     device["cooldown_until"]   = 0
+    device["last_values"] = {}
+
+    with state_lock:
+        serial_state = state.get(serial, {})
+        if isinstance(serial_state, dict):
+            for point in register_points:
+                value = serial_state.get(point["variable"])
+                if isinstance(value, int):
+                    device["last_values"][point["variable"]] = value
 
     while True:
         # Cooldown check
@@ -244,12 +299,28 @@ def run_device(device):
 
                 # Sends the first register from each read. If count > 1, combine words as needed per metric.
                 value = reg_result.registers[0]
-                frame = f"PUSH|{AUTH_HASH}|{serial}|[{point['variable']}:={value}]\n"
+                variable_name = point["variable"]
+                previous_value = device["last_values"].get(variable_name)
+                delta = compute_delta(value, previous_value, point["rollover_bits"])
+
+                frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}:={value}]\n"
                 ack = send_frame(tago_socket, frame, ack_timeout=8)
                 log.info(f"[{name}] Sent: {frame.strip()}")
                 log.info(f"[{name}] ACK:  {ack or '<no-ack>'}")
                 if ack and "ERR" in ack:
                     raise ConnectionAbortedError(f"TagoIO returned error ACK: {ack}")
+
+                delta_frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}_delta:={delta}]\n"
+                delta_ack = send_frame(tago_socket, delta_frame, ack_timeout=8)
+                log.info(f"[{name}] Sent: {delta_frame.strip()}")
+                log.info(f"[{name}] ACK:  {delta_ack or '<no-ack>'}")
+                if delta_ack and "ERR" in delta_ack:
+                    raise ConnectionAbortedError(f"TagoIO returned error ACK: {delta_ack}")
+
+                device["last_values"][variable_name] = value
+                with state_lock:
+                    state.setdefault(serial, {})[variable_name] = value
+                    save_last_values_state(LAST_VALUES_FILE, state)
             else:
                 device["consecutive_errors"] = 0
 
@@ -285,6 +356,7 @@ def run_device(device):
 
 # --- Main ---
 devices = load_devices(DEVICES_FILE)
+state = load_last_values_state(LAST_VALUES_FILE)
 
 threads = []
 for device in devices:
