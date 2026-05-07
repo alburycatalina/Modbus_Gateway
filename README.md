@@ -13,8 +13,8 @@ The Modbus registers we are polling on are:
 
 ## About working with the script
 
-- `pollees.csv` contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. See pollees.example.csv for an example. 
-- `.env` contains hash code for talking to Tago. [More here.](https://docs.tago.io/docs/tagoio/devices/device-token)
+- [`pollees.csv`](/pollees.csv) contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. See [`pollees.example.csv`](/pollees.example.csv) for an example. 
+- `.env` contains hash code for talking to Tago. [More here.](https://docs.tago.io/docs/tagoio/devices/device-token). It is also not shared for sercurity purposes. For an example see [`.env.example`](/.env.example). 
 
 ### Virtual environment
 
