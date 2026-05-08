@@ -10,7 +10,7 @@ Device or "pollee" (via Modbus/TCP) <- port 502 -> Gateway Script <-TagoTiP over
 
 ## About Devices
 
-In terminal, run `arp -a` to see the list of devices on the network. Use `ping (IP address)` to ping a device and see if it is online. 
+In terminal, run `arp -a` to see the list of devices on the network. Use `ping (IP address)` to ping a device and see if it is online. To check the registers on a Modbus device, [see this register detective snippet](/register_detective.py). 
 
 ### ADAM 
 
@@ -39,7 +39,7 @@ Run `.\modbusvenv\Scripts\Activate.ps1` in powershell to activate the venv. This
 
 ### Secrets
 - [`pollees.csv`](/pollees.csv) contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. See [`pollees.example.csv`](/pollees.example.csv) for an example. 
-- `.env` contains hash code for talking to Tago. [More here.](https://docs.tago.io/docs/tagoio/devices/device-token). It is also not shared for sercurity purposes. For an example see [`.env.example`](/.env.example). 
+- `.env` contains a hash code for talking to Tago. It can be found in Tago under Devices > Authorization (top right). [More here](https://docs.tago.io/docs/tagotip/specification/tagotip-specification#2-credentials). This file is also not shared for sercurity purposes. For an example see [`.env.example`](/.env.example). 
 
 ### `pollees.csv` format
 
