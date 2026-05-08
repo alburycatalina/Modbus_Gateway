@@ -16,7 +16,7 @@ AUTH_HASH = os.getenv("AUTH_HASH")
 if not AUTH_HASH: # if AUTH_HASH is not set, raise an error
     raise RuntimeError("Missing AUTH_HASH in environment/.env")
 ADAM_PORT = 502
-POLL_INTERVAL = 10
+POLL_INTERVAL = 60
 PING_INTERVAL = 20
 RECONNECT_INTERVAL = 3600 # attempt to reconnect every hour
 TAGO_HOST = "tcp.tip.us-e1.tago.io" # TagoIO host
@@ -24,7 +24,7 @@ TAGO_PORT = 5693 # TagoIO port1
 DEVICES_FILE = "pollees.csv" # list of devices to poll
 LOG_FILE = "poller.log" # lof of warnings and frames sent/received
 LAST_VALUES_FILE = "last_values.json"
-POLL_REGISTER_ADDRESS = 0x0018
+POLL_REGISTER_ADDRESS = 0x0018 # default register if not stated in pollees.csv 
 POLL_REGISTER_COUNT = 1
 TAGO_VARIABLE_NAME = "countfreq"
 RECONNECT_BACKOFF_BASE = 1
