@@ -56,6 +56,15 @@ The script supports one or more register points per device.
 - `count` defaults to `1`
 - `rollover_bits` defaults to `16 * count`
 
+The ADAM manual works with the full 5 digit modbus addresses. Pymodbus package uses a raw, zero based address (multiply by 40000 and add one to the last digit of each number to convert to 5-digit address). 4xxx registers are reserved for read/write output or holding registers. For example:
+
+| Manual Notation | Raw Address |
+|-------- | ------- |
+|40001 | 0 |
+|40002 |  1 |
+|40025 | 24 |
+|40026 | 25 |
+
 Example:
 
 ```csv
