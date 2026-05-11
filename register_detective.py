@@ -1,6 +1,6 @@
 from pymodbus.client import ModbusTcpClient
 
-IP = "10.21.1.173"  # Device ID
+IP = ""  # Device IP here
 PORT = 502 # port for modus
 SLAVE_ID = 1
 
