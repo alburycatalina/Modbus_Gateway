@@ -34,10 +34,6 @@ if not AUTH_HASH:
 ADAM_PORT = 502
 POLL_INTERVAL = 60
 
-# TagoTIP TCP limits: https://docs.tago.io/docs/tagotip/servers/rate-limits
-# - Idle: max ~5s without any uplink frame (use PING / PUSH).
-# - TTL: connection closed after ~10s (Free/Starter) or ~15s (Scale) regardless of traffic.
-
 
 def _float_env(name: str, default: float) -> float:
     raw = os.getenv(name)
@@ -84,6 +80,23 @@ log.addHandler(_file_handler)
 # Protects shared JSON state written from multiple device threads.
 state_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Encoding
+# ---------------------------------------------------------------------------
+
+# ADAM 6051 counters must have  
+# countfreq = (value of 40002) x 65536 + (value of 40001)
+
+def decode_register_value(registers, encoding):
+    """Combine raw Modbus register words into a single value per encoding."""
+    if encoding == "uint32_lohi":
+        # Low word first: registers[0]=low, registers[1]=high
+        return registers[0] + registers[1] * 65536
+    if encoding == "uint32_hilo":
+        # High word first: registers[0]=high, registers[1]=low
+        return registers[1] + registers[0] * 65536
+    # Default: single uint16
+    return registers[0]
 
 # ---------------------------------------------------------------------------
 # Persisted state (deltas across restarts)
@@ -159,20 +172,22 @@ def load_devices(filepath):
             if not part:
                 continue
             pieces = [p.strip() for p in part.split(":")]
-            if len(pieces) not in (2, 3, 4):
+            if len(pieces) not in (2, 3, 4, 5):
                 raise ValueError(
                     f"Invalid registers entry '{part}'. "
-                    "Expected variable:address[:count[:rollover_bits]]"
+                    "Expected variable:address[:count[:rollover_bits[:encoding]]]"
                 )
             variable = pieces[0]
             address = int(pieces[1], 0)
             count = int(pieces[2], 0) if len(pieces) >= 3 else 1
-            rollover_bits = int(pieces[3], 0) if len(pieces) == 4 else 16 * max(1, count)
+            rollover_bits = int(pieces[3], 0) if len(pieces) >= 4 else 16 * max(1, count)
+            encoding = pieces[4] if len(pieces) == 5 else ("uint32_lohi" if count == 2 else "uint16")
             points.append({
                 "variable": variable,
                 "address": address,
                 "count": count,
                 "rollover_bits": rollover_bits,
+                "encoding": encoding,
             })
         if not points:
             raise ValueError("registers field was provided but no valid entries were found")
@@ -193,7 +208,7 @@ def load_devices(filepath):
 
 
 # ---------------------------------------------------------------------------
-# Modbus/TCP (slave)
+# Modbus/TCP (server)
 # ---------------------------------------------------------------------------
 
 
@@ -351,6 +366,10 @@ def maintain_tago_socket_during_idle(device, total_sleep_seconds):
         reconnect_tago(device, log_connect=False)
 
 
+
+
+
+
 # ---------------------------------------------------------------------------
 # Per-device thread
 # ---------------------------------------------------------------------------
@@ -452,7 +471,7 @@ def run_device(device):
                     client = device["modbus"]
                     break
 
-                value = reg_result.registers[0]
+                value = decode_register_value(reg_result.registers, point.get("encoding", "uint16"))
                 variable_name = point["variable"]
                 previous_value = device["last_values"].get(variable_name)
                 delta = compute_delta(value, previous_value, point["rollover_bits"])

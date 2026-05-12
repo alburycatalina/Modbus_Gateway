@@ -38,7 +38,7 @@ A list of required libraries can be found in the `requirements.txt` file. Instal
 Run `.\modbusvenv\Scripts\Activate.ps1` in powershell to activate the venv. This creates an isolated directory on your computer that contains its own Python executable and pip libraries, avoiding package conflicts and version issues. 
 
 ### Secrets
-- [`pollees.csv`](/pollees.csv) contains a list of pollees, with a name, IP address, and serial number. It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. See [`pollees.example.csv`](/pollees.example.csv) for an example. 
+- [`pollees.csv`](/pollees.csv) contains a list of pollees, with a name, IP address, serial number, and registers to read and encoding (16/32 hilo or lohi). It is not pushed to this github for security purposes, but must be in the folder so that it can be accessed by the gateway script. See [`pollees.example.csv`](/pollees.example.csv) for an example. 
 - `.env` contains a hash code for talking to Tago. It can be found in Tago under Devices > Authorization (top right). [More here](https://docs.tago.io/docs/tagotip/specification/tagotip-specification#2-credentials). This file is also not shared for sercurity purposes. For an example see [`.env.example`](/.env.example). 
 
 ### `pollees.csv` format
@@ -55,15 +55,16 @@ The script supports one or more register points per device.
 - `address` can be hex (`0x18`) or decimal (`24`)
 - `count` defaults to `1`
 - `rollover_bits` defaults to `16 * count`
+- `encoding` specifies if a device's registers use hilo or lohi encoding
 
-The ADAM manual works with the full 5 digit modbus addresses. Pymodbus package uses a raw, zero based address (multiply by 40000 and add one to the last digit of each number to convert to 5-digit address). 4xxx registers are reserved for read/write output or holding registers. For example:
+The ADAM manual works with the full 5 digit modbus addresses. Pymodbus package uses a raw, zero based address (multiply by 40000 and add one to the last digit of each number to convert to 5-digit address). 4xxx registers are reserved for read/write output or holding registers. These are used in either decimal or binary in the code. For example:
 
-| Manual Notation | Raw Address |
-|-------- | ------- |
-|40001 | 0 |
-|40002 |  1 |
-|40025 | 24 |
-|40026 | 25 |
+| Manual Notation | Raw Address (Decimal) | Raw Address (Hex) |
+|-------- | ------- |------- |
+|40001 | 0 | 0x00 |
+|40002 |  1 | 0x01 |
+|40025 | 24 | 0x18 |
+|40026 | 25 | 0x19 |
 
 Example:
 
@@ -99,5 +100,4 @@ This gateway sends periodic `PING` frames during `POLL_INTERVAL` sleeps so the s
 | -------- | ------- | ------- |
 | `TAGO_KEEPALIVE_INTERVAL` | `4` | Seconds between uplink frames during idle (must stay **below 5**). |
 | `TAGO_TTL_RECONNECT_BEFORE` | `9` | Proactively reconnect before this many seconds since connect (under **10** on Free/Starter, around **14** on Scale). |
-
 
