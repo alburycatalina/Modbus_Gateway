@@ -1,14 +1,14 @@
 import time
 import socket
 import csv
-import threading
+import threading # manage threads
 import random
 import json
-from pymodbus.client import ModbusTcpClient
-from pymodbus.exceptions import ModbusException, ConnectionException
-from dotenv import load_dotenv
-import os
-import logging
+from pymodbus.client import ModbusTcpClient # modbus client
+from pymodbus.exceptions import ModbusException, ConnectionException # modbus exceptions
+from dotenv import load_dotenv # load environment variables from .env file
+import os # operating system
+import logging # logging
 
 # Set variables
 load_dotenv()
@@ -17,7 +17,22 @@ if not AUTH_HASH: # if AUTH_HASH is not set, raise an error
     raise RuntimeError("Missing AUTH_HASH in environment/.env")
 ADAM_PORT = 502
 POLL_INTERVAL = 60
-PING_INTERVAL = 20
+
+# TagoTIP TCP limits (see https://docs.tago.io/docs/tagotip/servers/rate-limits):
+# - Keep-alive idle timeout: 5s max silence between frames (use PING or PUSH).
+# - Connection TTL: 10s (Free/Starter) or 15s (Scale) — server closes after this regardless of traffic.
+def _float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    return float(raw)
+
+
+# Send at least one uplink frame before this interval elapses (must stay below 5s server idle limit).
+TAGO_KEEPALIVE_INTERVAL = _float_env("TAGO_KEEPALIVE_INTERVAL", 4.0)
+# Proactively reconnect before server TTL (default 9s < 10s Free/Starter TTL; use ~14 for Scale).
+TAGO_TTL_RECONNECT_BEFORE = _float_env("TAGO_TTL_RECONNECT_BEFORE", 9.0)
+
 RECONNECT_INTERVAL = 3600 # attempt to reconnect every hour
 TAGO_HOST = "tcp.tip.us-e1.tago.io" # TagoIO host
 TAGO_PORT = 5693 # TagoIO port1
@@ -45,6 +60,7 @@ file_handler.setFormatter(formatter)
 
 log.addHandler(file_handler)
 
+# Only one thread talks to the client at a time to avoid overlapping reads and writes
 state_lock = threading.Lock()
 
 # Load last value from JSON file for calculating deltas
@@ -217,6 +233,7 @@ def reconnect_tago(device):
     device["tago_socket"] = connect_tago(name)
     device["last_reconnect"] = time.time()
     device["last_ping"] = time.time()
+    device["tago_connect_time"] = time.time()
 
 # stops all devices from polling for a random amount of time to prevent overwhelming the server
 def sleep_reconnect_backoff(device):
@@ -229,6 +246,50 @@ def sleep_reconnect_backoff(device):
     )
     time.sleep(delay)
 
+
+def maintain_tago_socket_during_idle(device, total_sleep_seconds):
+    """
+    Sleep for total_sleep_seconds while honoring TagoTIP application-level limits:
+    periodic PING before the 5s idle timeout, and proactive reconnect before connection TTL.
+    """
+    deadline = time.time() + total_sleep_seconds
+    serial = device["serial"]
+    name = device["name"]
+
+    while time.time() < deadline:
+        now = time.time()
+        try:
+            if now - device["tago_connect_time"] >= TAGO_TTL_RECONNECT_BEFORE:
+                log.debug(
+                    f"[{name}] Proactive Tago reconnect before server connection TTL "
+                    f"(>{TAGO_TTL_RECONNECT_BEFORE}s since connect)"
+                )
+                reconnect_tago(device)
+                continue
+
+            if now - device["last_ping"] >= TAGO_KEEPALIVE_INTERVAL:
+                ping_frame = f"PING|{AUTH_HASH}|{serial}\n"
+                ack = send_frame(device["tago_socket"], ping_frame, ack_timeout=6)
+                log.debug(f"[{name}] Idle PING: {ack or '<no-ack>'}")
+                device["last_ping"] = time.time()
+
+                if ack and "ERR" in ack:
+                    log.warning(f"[{name}] Idle PING error ({ack}) — reconnecting...")
+                    reconnect_tago(device)
+                    continue
+
+        except (ConnectionResetError, BrokenPipeError, OSError) as e:
+            log.warning(f"[{name}] Tago idle keepalive failed ({e}) — reconnecting...")
+            reconnect_tago(device)
+            continue
+
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        # Wake often enough to stay under 5s idle and ~10s TTL without racing the clock.
+        time.sleep(min(1.0, remaining))
+
+
 def run_device(device):
     """Main polling loop for a single device — runs in its own thread."""
     name   = device["name"]
@@ -237,6 +298,7 @@ def run_device(device):
 
     device["modbus"]           = connect_modbus(device["ip"], name)
     device["tago_socket"]      = connect_tago(name)
+    device["tago_connect_time"] = time.time()
     device["last_ping"]        = time.time()
     device["last_reconnect"]   = time.time()
     device["consecutive_errors"] = 0
@@ -269,8 +331,14 @@ def run_device(device):
                 reconnect_tago(device)
                 tago_socket = device["tago_socket"]
 
-            # PING if due
-            if time.time() - device["last_ping"] >= PING_INTERVAL:
+            # Before Modbus/PUSH work: reconnect if connection is near server TTL (10s Free/Starter).
+            if time.time() - device["tago_connect_time"] >= TAGO_TTL_RECONNECT_BEFORE:
+                log.debug(f"[{name}] Proactive Tago reconnect before uplink work (connection TTL)...")
+                reconnect_tago(device)
+                tago_socket = device["tago_socket"]
+
+            # PING if due (works with TAGO_KEEPALIVE_INTERVAL; idle sleep uses the same rule)
+            if time.time() - device["last_ping"] >= TAGO_KEEPALIVE_INTERVAL:
                 ping_frame = f"PING|{AUTH_HASH}|{serial}\n"
                 ack = send_frame(tago_socket, ping_frame, ack_timeout=6)
                 log.info(f"[{name}] PING: {ack or '<no-ack>'}")
@@ -352,7 +420,7 @@ def run_device(device):
             sleep_reconnect_backoff(device)
             reconnect_tago(device)
 
-        time.sleep(POLL_INTERVAL)
+        maintain_tago_socket_during_idle(device, POLL_INTERVAL)
 
 # --- Main ---
 devices = load_devices(DEVICES_FILE)

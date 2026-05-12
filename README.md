@@ -89,4 +89,15 @@ How `delta` is calculated:
 
 Previous values are persisted in `last_values.json` so deltas continue across restarts.
 
+### TagoTIP TCP timing (disconnects / `keep_alive_timeout`)
+
+Tago’s TCP endpoints enforce both a **keep-alive idle timeout** (default **5 seconds** without any uplink frame) and a **connection TTL** (default **10 seconds** total connection duration on Free/Starter, **15 seconds** on Scale). Details: [Rate limits](https://docs.tago.io/docs/tagotip/servers/rate-limits).
+
+This gateway sends periodic `PING` frames during `POLL_INTERVAL` sleeps so the socket does not sit idle longer than the server allows, and reconnects proactively before the connection TTL. Optional environment overrides:
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `TAGO_KEEPALIVE_INTERVAL` | `4` | Seconds between uplink frames during idle (must stay **below 5**). |
+| `TAGO_TTL_RECONNECT_BEFORE` | `9` | Proactively reconnect before this many seconds since connect (under **10** on Free/Starter, around **14** on Scale). |
+
 
