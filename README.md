@@ -60,6 +60,7 @@ Eg: countfreq:24:2:32:uint32_lohi denotes a variable countfreq that uses two pos
 - `count` defaults to `1`
 - `rollover_bits` defaults to `16 * count`
 - `encoding` specifies if a device's registers use hilo or lohi encoding
+
 Example:
 
 ```csv
@@ -81,10 +82,7 @@ The ADAM manual works with the full 5 digit modbus addresses. Pymodbus package u
 
 ### Delta behavior and persisted state
 
-For each configured register point, the gateway sends:
-
-- Current value: `[variable:=value]`
-- Delta value: `[variable_delta:=delta]`
+For each configured register point, the gateway sends a current value and delta. 
 
 How `delta` is calculated:
 
