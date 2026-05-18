@@ -477,6 +477,9 @@ def run_device(device):
                 value = decode_register_value(reg_result.registers, point.get("encoding", "uint16"))
                 variable_name = point["variable"]
                 previous_value = device["last_values"].get(variable_name)
+
+                encoding = point.get("encoding", "uint16") #uint16 as default if no encoding provided
+
                 delta = compute_delta(value, previous_value, point["rollover_bits"])
 
                 frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}:={value}]\n"
@@ -488,16 +491,18 @@ def run_device(device):
                 log.info("[%s] ACK:  %s", name, ack or "<no-ack>")
                 if ack and "ERR" in ack:
                     raise ConnectionAbortedError(f"TagoIO returned error ACK: {ack}")
+        
 
-                delta_frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}_delta:={delta}]\n"
-                try:
-                    delta_ack = send_frame(tago_socket, delta_frame, ack_timeout=8)
-                except (ConnectionResetError, BrokenPipeError, OSError) as e:
-                    raise ConnectionAbortedError(f"Tago PUSH (delta) failed: {e}") from e
-                log.info("[%s] Sent: %s", name, delta_frame.strip())
-                log.info("[%s] ACK:  %s", name, delta_ack or "<no-ack>")
-                if delta_ack and "ERR" in delta_ack:
-                    raise ConnectionAbortedError(f"TagoIO returned error ACK: {delta_ack}")
+                if encoding != "ai16": # do not compute deltas when analog input 16 as in 6017
+                    delta_frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}_delta:={delta}]\n"
+                    try:
+                        delta_ack = send_frame(tago_socket, delta_frame, ack_timeout=8)
+                    except (ConnectionResetError, BrokenPipeError, OSError) as e:
+                        raise ConnectionAbortedError(f"Tago PUSH (delta) failed: {e}") from e
+                    log.info("[%s] Sent: %s", name, delta_frame.strip())
+                    log.info("[%s] ACK:  %s", name, delta_ack or "<no-ack>")
+                    if delta_ack and "ERR" in delta_ack:
+                        raise ConnectionAbortedError(f"TagoIO returned error ACK: {delta_ack}")
 
                 device["last_values"][variable_name] = value
                 with state_lock:
