@@ -499,7 +499,7 @@ def run_device(device):
                         delta_ack = send_frame(tago_socket, delta_frame, ack_timeout=8)
                     except (ConnectionResetError, BrokenPipeError, OSError) as e:
                         raise ConnectionAbortedError(f"Tago PUSH (delta) failed: {e}") from e
-                    log.info("[%s] Sent: %s", name, delta_frame.strip())
+                    log.info("[%s] Sent: %s", name, delta_frame.strip()) 
                     log.info("[%s] ACK:  %s", name, delta_ack or "<no-ack>")
                     if delta_ack and "ERR" in delta_ack:
                         raise ConnectionAbortedError(f"TagoIO returned error ACK: {delta_ack}")
