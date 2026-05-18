@@ -201,9 +201,9 @@ def load_devices(filepath):
         reader = csv.DictReader(f)
         for row in reader:
             devices.append({
-                "name": row["name"],
-                "ip": row["ip"],
-                "serial": row["serial"],
+                "name": row["name"].strip(),
+                "ip": row["ip"].strip(),
+                "serial": row["serial"].strip(),
                 "register_points": parse_register_points(row),
             })
     log.info("Loaded %d device(s) from %s", len(devices), filepath)
@@ -380,8 +380,8 @@ def maintain_tago_socket_during_idle(device, total_sleep_seconds):
 
 def run_device(device):
     """
-    Loop forever: (optional Modbus refresh) → Tago housekeeping → read registers → PUSH →
-    sleep POLL_INTERVAL on Tago-only maintenance → repeat.
+    Loop forever: (optional Modbus refresh) > Tago housekeeping > read registers > PUSH >
+    sleep POLL_INTERVAL on Tago-only maintenance > repeat.
 
     first_modbus_poll skips Modbus refresh on the very first iteration (fresh connect above).
     """
