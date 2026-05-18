@@ -90,11 +90,14 @@ state_lock = threading.Lock()
 def decode_register_value(registers, encoding):
     """Combine raw Modbus register words into a single value per encoding."""
     if encoding == "uint32_lohi":
-        # Low word first: registers[0]=low, registers[1]=high
+        # Low word first: registers[0]=low, registers[1]=high (ex: ADAM 6015)
         return registers[0] + registers[1] * 65536
     if encoding == "uint32_hilo":
         # High word first: registers[0]=high, registers[1]=low
         return registers[1] + registers[0] * 65536
+    if encoding == "ai16":
+        # for analog input with single register (ex: ADAM 6017)
+        return (registers[0] / 65535) * 10 
     # Default: single uint16
     return registers[0]
 
