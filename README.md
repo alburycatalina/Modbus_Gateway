@@ -59,7 +59,7 @@ Eg: countfreq:24:2:32:uint32_lohi denotes a variable countfreq that uses two pos
 - `address` can be hex (`0x18`) or decimal (`24`)
 - `count` defaults to `1`
 - `rollover_bits` defaults to `16 * count`
-- `encoding` specifies if a device's registers use hilo or lohi encoding
+- `encoding` specifies if a device's registers use hilo or lohi encoding and does unit conversion
 
 Example:
 
@@ -77,6 +77,14 @@ The ADAM manual works with the full 5 digit modbus addresses. Pymodbus package u
 |40002 |  1 | 0x01 |
 |40025 | 24 | 0x18 |
 |40026 | 25 | 0x19 |
+
+### Encoding and Unit Conversion
+
+Based on whether a device is sending 16/32/64 bit signals over registers, encoding and unit conversion are nessary. Some devices send information over 2 regsiters (32 bit) and others a single one (16 bit). 
+
+ADAM 6051's  32 bit counters are converted by the following formula: registers[0] + registers[1] * 65536
+
+ADAM 6017 are 16 bit analog inputs are converted by: (registers[0] / 65535) * 10 
 
 
 

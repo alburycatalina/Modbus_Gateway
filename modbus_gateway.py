@@ -90,11 +90,14 @@ state_lock = threading.Lock()
 def decode_register_value(registers, encoding):
     """Combine raw Modbus register words into a single value per encoding."""
     if encoding == "uint32_lohi":
-        # Low word first: registers[0]=low, registers[1]=high
+        # Low word first: registers[0]=low, registers[1]=high (ex: ADAM 6015)
         return registers[0] + registers[1] * 65536
     if encoding == "uint32_hilo":
         # High word first: registers[0]=high, registers[1]=low
         return registers[1] + registers[0] * 65536
+    if encoding == "ai16":
+        # for analog input with single register (ex: ADAM 6017)
+        return (registers[0] / 65535) * 10 
     # Default: single uint16
     return registers[0]
 
@@ -198,9 +201,9 @@ def load_devices(filepath):
         reader = csv.DictReader(f)
         for row in reader:
             devices.append({
-                "name": row["name"],
-                "ip": row["ip"],
-                "serial": row["serial"],
+                "name": row["name"].strip(),
+                "ip": row["ip"].strip(),
+                "serial": row["serial"].strip(),
                 "register_points": parse_register_points(row),
             })
     log.info("Loaded %d device(s) from %s", len(devices), filepath)
@@ -377,8 +380,8 @@ def maintain_tago_socket_during_idle(device, total_sleep_seconds):
 
 def run_device(device):
     """
-    Loop forever: (optional Modbus refresh) → Tago housekeeping → read registers → PUSH →
-    sleep POLL_INTERVAL on Tago-only maintenance → repeat.
+    Loop forever: (optional Modbus refresh) > Tago housekeeping > read registers > PUSH >
+    sleep POLL_INTERVAL on Tago-only maintenance > repeat.
 
     first_modbus_poll skips Modbus refresh on the very first iteration (fresh connect above).
     """
