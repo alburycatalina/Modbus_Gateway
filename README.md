@@ -8,7 +8,7 @@ Device or "pollee" (via Modbus/TCP) <- port 502 -> Gateway Script <-TagoTiP over
 
 ## About Devices
 
-* In powershell, run `arp -a` to see the list of devices previously connected to PC. 
+* In cmd, run `arp -a` to see the list of devices previously connected to PC. 
 * In cmd, `for /l %i in (1,1,254) do @ping 10.21.1.%i -n 1 -w 100 | find "Reply"` for all devices on network
 * Use `ping (IP address)` to ping a device and see if it is online. 
 * To check which registers on a Modbus device are reporting, [see this register detective snippet](/register_detective.py). 
