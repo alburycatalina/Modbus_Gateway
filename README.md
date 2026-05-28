@@ -8,7 +8,7 @@ Device or "pollee" (via Modbus/TCP) <- port 502 -> Gateway Script <-TagoTiP over
 
 ## About Devices
 
-* In powershell, run `arp -a` to see the list of devices previously connected to PC. 
+* In cmd, run `arp -a` to see the list of devices previously connected to PC. 
 * In cmd, `for /l %i in (1,1,254) do @ping 10.21.1.%i -n 1 -w 100 | find "Reply"` for all devices on network
 * Use `ping (IP address)` to ping a device and see if it is online. 
 * To check which registers on a Modbus device are reporting, [see this register detective snippet](/register_detective.py). 
@@ -23,6 +23,9 @@ In the [ADAM utility software](https://www.advantech.com/en-us/support/details/u
 
 #### ADAM 6051
 The ADAM-6051 has 12 digital inputs, 2 counter channels, and 2 digital outputs with 2000 VDC isolation. All digital inputs have a latch function and can be used as counter/frequency input channels. All of these are readable over Modbus/TCP on port 502.
+
+#### Serial Servers
+To get connected to a new serial server, plug it into your computer and enure it has power. Then, find out what the default IP is and change your computer's IP to something that matches it's first three digits. When that's done, you should be able to visit the device's IP in your browser and assign it a new IP. Connect the device to the ethernet and reassign your normal IP. 
 
 
 ## About  the script
