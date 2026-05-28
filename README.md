@@ -82,13 +82,16 @@ The ADAM manual works with the full 5 digit modbus addresses. Pymodbus package u
 |40025 | 24 | 0x18 |
 |40026 | 25 | 0x19 |
 
-### Encoding and Unit Conversion
+### Encoding and Unit Conversion by Device Type
 
-Based on whether a device is sending 16/32/64 bit signals over registers, encoding and unit conversion are nessary. Some devices send information over 2 regsiters (32 bit) and others a single one (16 bit). 
+The function `decode_register_value()` defines how each device's encoding and unit conversion needs. Based on whether a device is sending 16/32/64 bit signals over registers, encoding and unit conversion are nessary. Some devices send information over 2 registers (32 bit) and others a single one (16 bit). 
 
-ADAM 6051's  32 bit counters are converted by the following formula: registers[0] + registers[1] * 65536
+| Device | Bits | Engineering Unit | Conversion Formula |
+|-------- | ------- |------- |------- |
+|ADAM 6051 | 32 | count | registers[0] + registers[1] * 65536 |
+|ADAM 6017 |  16 | 0x01 | (registers[0] / 65535) * 10 |
+|Elkor WattsOn | 32 | 0x18 | concatonate 2 values // int(str(registers[0]) + str(registers[1])) |
 
-ADAM 6017 are 16 bit analog inputs are converted by: (registers[0] / 65535) * 10 
 
 
 

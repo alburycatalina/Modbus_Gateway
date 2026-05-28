@@ -3,10 +3,6 @@ Modbus / TagoTIP gateway: one thread per device in pollees.csv.
 
 Each thread polls Modbus/TCP (ADAM or similar), pushes readings to Tago.io via TagoTIP
 over TCP, and persists last values for delta calculations.
-
-Constraints handled explicitly:
-- TagoTIP: ~5s application idle limit and ~10s connection TTL on Free/Starter (see Tago docs).
-- Modbus/TCP: many slaves close idle TCP after roughly one poll interval; refresh client after waits.
 """
 
 import csv
@@ -84,21 +80,18 @@ state_lock = threading.Lock()
 # Encoding
 # ---------------------------------------------------------------------------
 
-# ADAM 6051 counters must have  
-# countfreq = (value of 40002) x 65536 + (value of 40001)
-
-def decode_register_value(registers, encoding):
+def decode_register_value(registers, device_type):
     """Combine raw Modbus register words into a single value per encoding."""
-    if encoding == "uint32_lohi":
-        # Low word first: registers[0]=low, registers[1]=high (ex: ADAM 6015)
+    if device_type == "elkor_wattsOn":
+        # 32 bit high endian concatenate
+        return int(str(registers[0]) + str(registers[1])) 
+    if device_type == "adam6051":
+        # 32 bit high endian rollover bit
         return registers[0] + registers[1] * 65536
-    if encoding == "uint32_hilo":
-        # High word first: registers[0]=high, registers[1]=low
-        return registers[1] + registers[0] * 65536
-    if encoding == "ai16":
-        # for analog input with single register (ex: ADAM 6017)
+    if device_type == "adam6017":
+        # 16 bit analog input with single register
         return (registers[0] / 65535) * 10 
-    # Default: single uint16
+    # Default: 16 bit
     return registers[0]
 
 # ---------------------------------------------------------------------------
@@ -127,7 +120,7 @@ def save_last_values_state(filepath, state):
         json.dump(state, f, indent=2, sort_keys=True)
     os.replace(temp_path, filepath)
 
-
+# FIXME don't like the term rollover bits here??
 def compute_delta(current_value, previous_value, rollover_bits):
     """Difference since last sample; optional counter rollover using rollover_bits width."""
     if previous_value is None:
@@ -209,6 +202,64 @@ def load_devices(filepath):
     log.info("Loaded %d device(s) from %s", len(devices), filepath)
     return devices
 
+# ---------------------------------------------------------------------------
+# Modbus drivers (transport abstraction)
+# ---------------------------------------------------------------------------
+
+class ModbusTCPDriver:
+    """Standard Modbus TCP — your existing ADAM devices."""
+    def __init__(self, ip, port=502):
+        self.ip = ip
+        self.port = port
+        self.client = None
+
+    def connect(self):
+        while True:
+            self.client = ModbusTcpClient(host=self.ip, port=self.port)
+            if self.client.connect():
+                return
+            time.sleep(5)
+
+    def read_registers(self, address, count):
+        return self.client.read_holding_registers(address=address, count=count)
+
+    def close(self):
+        if self.client:
+            self.client.close()
+
+
+class ModbusRTUOverTCPDriver:
+    """Modbus RTU framed over TCP — serial server devices."""
+    def __init__(self, ip, port, device_id):
+        self.ip = ip
+        self.port = port          # e.g. 4001, 4002 — varies per serial server FIXME add to csv
+        self.device_id = device_id  # maps to `slave=` in pymodbus
+        self.client = None
+
+    def connect(self):
+        from pymodbus.client import ModbusTcpClient
+        while True:
+            # framer="rtu" tells pymodbus to use RTU framing over the TCP socket
+            self.client = ModbusTcpClient(
+                host=self.ip,
+                port=self.port,
+                framer="rtu",
+            )
+            if self.client.connect():
+                return
+            time.sleep(5)
+
+    def read_registers(self, address, count):
+        # device_id is the RTU slave address
+        return self.client.read_holding_registers(
+            address=address,
+            count=count,
+            slave=self.device_id,
+        )
+
+    def close(self):
+        if self.client:
+            self.client.close()
 
 # ---------------------------------------------------------------------------
 # Modbus/TCP (server)
