@@ -139,56 +139,54 @@ def compute_delta(current_value, previous_value, rollover_bits):
 # Device list (CSV)
 # ---------------------------------------------------------------------------
 
+def parse_int(value, default):
+    if value is None:
+        return default
+    text = str(value).strip()
+    if not text:
+        return default
+    return int(text, 0)
 
+def parse_register_points(row):
+    # registers=variable:address[:count[:rollover_bits]];...
+    text = (row.get("registers") or "").strip()
+    if not text:
+        default_count = parse_int(row.get("register_count"), POLL_REGISTER_COUNT)
+        return [{
+            "variable": (row.get("variable_name") or TAGO_VARIABLE_NAME).strip(),
+            "address": parse_int(row.get("register_address"), POLL_REGISTER_ADDRESS),
+            "count": default_count,
+            "rollover_bits": 16 * max(1, default_count),
+        }]
+    points = []
+    for raw_part in text.split(";"):
+        part = raw_part.strip()
+        if not part:
+            continue
+        pieces = [p.strip() for p in part.split(":")]
+        if len(pieces) not in (2, 3, 4, 5):
+            raise ValueError(
+                f"Invalid registers entry '{part}'. "
+                "Expected variable:address[:count[:rollover_bits[:encoding]]]"
+            )
+        variable = pieces[0]
+        address = int(pieces[1], 0)
+        count = int(pieces[2], 0) if len(pieces) >= 3 else 1
+        rollover_bits = int(pieces[3], 0) if len(pieces) >= 4 else 16 * max(1, count)
+        encoding = pieces[4] if len(pieces) == 5 else ("uint32_lohi" if count == 2 else "uint16")
+        points.append({
+            "variable": variable,
+            "address": address,
+            "count": count,
+            "rollover_bits": rollover_bits,
+            "encoding": encoding,
+        })
+    if not points:
+        raise ValueError("registers field was provided but no valid entries were found")
+    return points
+    
 def load_devices(filepath):
     """Build device dicts with register_points[] used by the poll loop."""
-
-    def parse_int(value, default):
-        if value is None:
-            return default
-        text = str(value).strip()
-        if not text:
-            return default
-        return int(text, 0)
-
-    def parse_register_points(row):
-        # registers=variable:address[:count[:rollover_bits]];...
-        text = (row.get("registers") or "").strip()
-        if not text:
-            default_count = parse_int(row.get("register_count"), POLL_REGISTER_COUNT)
-            return [{
-                "variable": (row.get("variable_name") or TAGO_VARIABLE_NAME).strip(),
-                "address": parse_int(row.get("register_address"), POLL_REGISTER_ADDRESS),
-                "count": default_count,
-                "rollover_bits": 16 * max(1, default_count),
-            }]
-        points = []
-        for raw_part in text.split(";"):
-            part = raw_part.strip()
-            if not part:
-                continue
-            pieces = [p.strip() for p in part.split(":")]
-            if len(pieces) not in (2, 3, 4, 5):
-                raise ValueError(
-                    f"Invalid registers entry '{part}'. "
-                    "Expected variable:address[:count[:rollover_bits[:encoding]]]"
-                )
-            variable = pieces[0]
-            address = int(pieces[1], 0)
-            count = int(pieces[2], 0) if len(pieces) >= 3 else 1
-            rollover_bits = int(pieces[3], 0) if len(pieces) >= 4 else 16 * max(1, count)
-            encoding = pieces[4] if len(pieces) == 5 else ("uint32_lohi" if count == 2 else "uint16")
-            points.append({
-                "variable": variable,
-                "address": address,
-                "count": count,
-                "rollover_bits": rollover_bits,
-                "encoding": encoding,
-            })
-        if not points:
-            raise ValueError("registers field was provided but no valid entries were found")
-        return points
-
     devices = []
     with open(filepath, newline="") as f:
         reader = csv.DictReader(f)
