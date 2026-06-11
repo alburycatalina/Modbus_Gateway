@@ -3,10 +3,6 @@ Modbus / TagoTIP gateway: one thread per device in pollees.csv.
 
 Each thread polls Modbus/TCP (ADAM or similar), pushes readings to Tago.io via TagoTIP
 over TCP, and persists last values for delta calculations.
-
-Constraints handled explicitly:
-- TagoTIP: ~5s application idle limit and ~10s connection TTL on Free/Starter (see Tago docs).
-- Modbus/TCP: many slaves close idle TCP after roughly one poll interval; refresh client after waits.
 """
 
 import csv
@@ -84,21 +80,18 @@ state_lock = threading.Lock()
 # Encoding
 # ---------------------------------------------------------------------------
 
-# ADAM 6051 counters must have  
-# countfreq = (value of 40002) x 65536 + (value of 40001)
-
-def decode_register_value(registers, encoding):
+def decode_register_value(registers, device_type):
     """Combine raw Modbus register words into a single value per encoding."""
-    if encoding == "uint32_lohi":
-        # Low word first: registers[0]=low, registers[1]=high (ex: ADAM 6015)
+    if device_type == "elkor_wattsOn":
+        # 32 bit high endian concatenate
+        return int(str(registers[0]) + str(registers[1])) 
+    if device_type == "adam6051":
+        # 32 bit high endian rollover bit
         return registers[0] + registers[1] * 65536
-    if encoding == "uint32_hilo":
-        # High word first: registers[0]=high, registers[1]=low
-        return registers[1] + registers[0] * 65536
-    if encoding == "ai16":
-        # for analog input with single register (ex: ADAM 6017)
+    if device_type == "adam6017":
+        # 16 bit analog input with single register
         return (registers[0] / 65535) * 10 
-    # Default: single uint16
+    # Default: 16 bit
     return registers[0]
 
 # ---------------------------------------------------------------------------
@@ -127,75 +120,69 @@ def save_last_values_state(filepath, state):
         json.dump(state, f, indent=2, sort_keys=True)
     os.replace(temp_path, filepath)
 
-
-def compute_delta(current_value, previous_value, rollover_bits):
-    """Difference since last sample; optional counter rollover using rollover_bits width."""
+# FIXME don't like the term rollover bits here??
+def compute_delta(current_value, previous_value):
     if previous_value is None:
         return 0
     delta = current_value - previous_value
-    if delta >= 0:
-        return delta
-    if rollover_bits and rollover_bits > 0:
-        max_value = (1 << rollover_bits) - 1
-        if previous_value <= max_value and current_value <= max_value:
-            return (max_value - previous_value) + current_value + 1
-    return 0
+    return delta if delta >= 0 else 0
 
 
 # ---------------------------------------------------------------------------
 # Device list (CSV)
 # ---------------------------------------------------------------------------
 
+# clean up integrers and use defaults if not available
+def parse_int(value, default):
+    if value is None:
+        return default
+    text = str(value).strip()
+    if not text or text.upper() == "NA":
+        return default
+    return int(text, 0)
 
+def parse_str(value, default):
+    if value is None:
+        return default
+    text = str(value).strip()
+    if not text or text.upper() == "NA":
+        return default
+    return text
+
+# parse register points from pollees sheet
+def parse_register_points(row):
+    # registers=variable:address[:count[:rollover_bits]];...
+    text = (row.get("variable") or "").strip()
+    if not text:
+        default_count = parse_int(row.get("register_count"), POLL_REGISTER_COUNT)
+        return [{
+            "variable": (row.get("variable_name") or TAGO_VARIABLE_NAME).strip(),
+            "address": parse_int(row.get("register_address"), POLL_REGISTER_ADDRESS),
+            "count": default_count,
+        }]
+    points = []
+    for raw_part in text.split(";"):
+        part = raw_part.strip()
+        if not part:
+            continue
+        pieces = [p.strip() for p in part.split(":")]
+        if len(pieces) not in (2, 3):
+            raise ValueError(
+                f"Invalid registers entry '{part}'. "
+                "Expected variable:address[:count]"
+            )
+        points.append({
+            "variable": pieces[0],
+            "address": int(pieces[1], 0),
+            "count": int(pieces[2], 0) if len(pieces) == 3 else 1,
+                })
+    if not points:
+        raise ValueError("registers field was provided but no valid entries were found")
+    return points
+    
+    
 def load_devices(filepath):
     """Build device dicts with register_points[] used by the poll loop."""
-
-    def parse_int(value, default):
-        if value is None:
-            return default
-        text = str(value).strip()
-        if not text:
-            return default
-        return int(text, 0)
-
-    def parse_register_points(row):
-        # registers=variable:address[:count[:rollover_bits]];...
-        text = (row.get("registers") or "").strip()
-        if not text:
-            default_count = parse_int(row.get("register_count"), POLL_REGISTER_COUNT)
-            return [{
-                "variable": (row.get("variable_name") or TAGO_VARIABLE_NAME).strip(),
-                "address": parse_int(row.get("register_address"), POLL_REGISTER_ADDRESS),
-                "count": default_count,
-                "rollover_bits": 16 * max(1, default_count),
-            }]
-        points = []
-        for raw_part in text.split(";"):
-            part = raw_part.strip()
-            if not part:
-                continue
-            pieces = [p.strip() for p in part.split(":")]
-            if len(pieces) not in (2, 3, 4, 5):
-                raise ValueError(
-                    f"Invalid registers entry '{part}'. "
-                    "Expected variable:address[:count[:rollover_bits[:encoding]]]"
-                )
-            variable = pieces[0]
-            address = int(pieces[1], 0)
-            count = int(pieces[2], 0) if len(pieces) >= 3 else 1
-            rollover_bits = int(pieces[3], 0) if len(pieces) >= 4 else 16 * max(1, count)
-            encoding = pieces[4] if len(pieces) == 5 else ("uint32_lohi" if count == 2 else "uint16")
-            points.append({
-                "variable": variable,
-                "address": address,
-                "count": count,
-                "rollover_bits": rollover_bits,
-                "encoding": encoding,
-            })
-        if not points:
-            raise ValueError("registers field was provided but no valid entries were found")
-        return points
-
     devices = []
     with open(filepath, newline="") as f:
         reader = csv.DictReader(f)
@@ -204,39 +191,102 @@ def load_devices(filepath):
                 "name": row["name"].strip(),
                 "ip": row["ip"].strip(),
                 "serial": row["serial"].strip(),
+                "device_type": parse_str(row.get("device_type"), "unknown"),
                 "register_points": parse_register_points(row),
+                "protocol": parse_str(row.get("protocol"), "tcp"),
+                "port": parse_int(row.get("port"), ADAM_PORT),
+                "device_id":parse_int(row.get("device_id"), 1),
             })
+    log.info("[%s] register_points: %s", row["name"].strip(), parse_register_points(row))
     log.info("Loaded %d device(s) from %s", len(devices), filepath)
     return devices
 
+# ---------------------------------------------------------------------------
+# Modbus drivers (transport abstraction)
+# ---------------------------------------------------------------------------
+
+class ModbusTCPDriver:
+    """Standard Modbus TCP — your existing ADAM devices."""
+    def __init__(self, ip, port=502):
+        self.ip = ip
+        self.port = port
+        self.client = None
+
+    def connect(self):
+        while True:
+            self.client = ModbusTcpClient(host=self.ip, port=self.port)
+            if self.client.connect():
+                return
+            time.sleep(5)
+
+    def read_registers(self, address, count):
+        return self.client.read_holding_registers(address=address, count=count)
+
+    def close(self):
+        if self.client:
+            self.client.close()
+
+
+class ModbusRTUOverTCPDriver:
+    """Modbus RTU framed over TCP — serial server devices."""
+    def __init__(self, ip, port, device_id):
+        self.ip = ip
+        self.port = port          # e.g. 4001, 4002 — varies per serial server FIXME add to csv
+        self.device_id = device_id  # maps to `slave=` in pymodbus
+        self.client = None
+
+    def connect(self):
+        from pymodbus.client import ModbusTcpClient
+        while True:
+            # framer="rtu" tells pymodbus to use RTU framing over the TCP socket
+            self.client = ModbusTcpClient(
+                host=self.ip,
+                port=self.port,
+                framer="rtu",
+            )
+            if self.client.connect():
+                return
+            time.sleep(5)
+
+    def read_registers(self, address, count):
+        # device_id is the RTU slave address
+        return self.client.read_holding_registers(
+            address=address,
+            count=count,
+            slave=self.device_id,
+        )
+
+    def close(self):
+        if self.client:
+            self.client.close()
 
 # ---------------------------------------------------------------------------
 # Modbus/TCP (server)
 # ---------------------------------------------------------------------------
 
 
-def connect_modbus(ip, name, *, log_success=True):
-    """Block until Modbus/TCP connects."""
-    while True:
-        client = ModbusTcpClient(host=ip, port=ADAM_PORT)
-        if client.connect():
-            msg = f"[{name}] Connected to ADAM at {ip}"
-            log.info(msg) if log_success else log.debug(msg)
-            return client
-        log.warning("[%s] Failed to connect to ADAM at %s — retrying in 5s", name, ip)
-        time.sleep(5)
+# def connect_modbus(ip, name, *, log_success=True):
+#     """Block until Modbus/TCP connects."""
+#     while True:
+#         client = ModbusTcpClient(host=ip, port=ADAM_PORT)
+#         if client.connect():
+#             msg = f"[{name}] Connected to ADAM at {ip}"
+#             log.info(msg) if log_success else log.debug(msg)
+#             return client
+#         log.warning("[%s] Failed to connect to ADAM at %s — retrying in 5s", name, ip)
+#         time.sleep(5)
 
 
-def refresh_modbus_after_idle(device):
-    """Close and reopen Modbus client after POLL_INTERVAL with no Modbus traffic."""
-    name = device["name"]
-    ip = device["ip"]
-    try:
-        device["modbus"].close()
-    except Exception:
-        pass
-    device["modbus"] = connect_modbus(ip, name, log_success=False)
-    log.debug("[%s] Modbus TCP session reopened after idle window", name)
+# def refresh_modbus_after_idle(device):
+#     """Close and reopen Modbus client after POLL_INTERVAL with no Modbus traffic."""
+#     name = device["name"]
+#     ip = device["ip"]
+#     try:
+#         device["modbus"].close()
+#     except Exception:
+#         pass
+#     device["modbus"] = device["driver"].connect()
+#     log.debug("[%s] Modbus TCP session reopened after idle window", name)
 
 
 # ---------------------------------------------------------------------------
@@ -385,11 +435,25 @@ def run_device(device):
 
     first_modbus_poll skips Modbus refresh on the very first iteration (fresh connect above).
     """
+
+    
     name = device["name"]
     serial = device["serial"]
     register_points = device["register_points"]
 
-    device["modbus"] = connect_modbus(device["ip"], name)
+    if device["protocol"] == "rtu_over_tcp":
+        driver = ModbusRTUOverTCPDriver(
+            ip=device["ip"],
+            port=device["port"],
+            device_id=device["device_id"],
+    )
+    else:
+        driver = ModbusTCPDriver(ip=device["ip"], port=device["port"])
+
+    device["driver"] = driver
+    log.info("[%s] Connecting via %s...", name, device["protocol"])
+    driver.connect()
+
     device["tago_socket"] = None
     reconnect_tago(device, log_connect=True)
     device["consecutive_errors"] = 0
@@ -415,10 +479,10 @@ def run_device(device):
             continue
 
         if not first_modbus_poll:
-            refresh_modbus_after_idle(device)
+            device["driver"].connect()
 
         tago_socket = device["tago_socket"]
-        client = device["modbus"]
+        driver = device["driver"]
 
         try:
             # Scheduled reconnect uses its own deadline (not last_reconnect — that updates on every TTL reconnect).
@@ -450,7 +514,7 @@ def run_device(device):
 
             for point in register_points:
                 try:
-                    reg_result = client.read_holding_registers(
+                    reg_result = driver.read_registers(
                         address=point["address"],
                         count=point["count"],
                     )
@@ -460,7 +524,7 @@ def run_device(device):
                         name, type(e).__name__, e,
                     )
                     client.close()
-                    device["modbus"] = connect_modbus(device["ip"], name)
+                    device["modbus"] = device["driver"].connect()
                     client = device["modbus"]
                     break
 
@@ -470,17 +534,17 @@ def run_device(device):
                         name, point["variable"], point["address"], point["count"],
                     )
                     client.close()
-                    device["modbus"] = connect_modbus(device["ip"], name)
+                    device["modbus"] = device["driver"].connect()
                     client = device["modbus"]
                     break
 
-                value = decode_register_value(reg_result.registers, point.get("encoding", "uint16"))
+                value = decode_register_value(reg_result.registers, device["device_type"])
                 variable_name = point["variable"]
                 previous_value = device["last_values"].get(variable_name)
 
                 encoding = point.get("encoding", "uint16") #uint16 as default if no encoding provided
 
-                delta = compute_delta(value, previous_value, point["rollover_bits"])
+                delta = compute_delta(value, previous_value)
 
                 frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}:={value}]\n"
                 try:
@@ -493,7 +557,7 @@ def run_device(device):
                     raise ConnectionAbortedError(f"TagoIO returned error ACK: {ack}")
         
 
-                if encoding != "ai16": # do not compute deltas when analog input 16 as in 6017
+                if device["device_type"] != "adam6017": # do not compute deltas when analog input 16 as in 6017
                     delta_frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}_delta:={delta}]\n"
                     try:
                         delta_ack = send_frame(tago_socket, delta_frame, ack_timeout=8)
@@ -532,7 +596,7 @@ def run_device(device):
                 client.close()
             except Exception:
                 pass
-            device["modbus"] = connect_modbus(device["ip"], name)
+            device["modbus"] = device["driver"].connect()
 
         except Exception as e:
             log.error("[%s] Unexpected error (%s)", name, e)
