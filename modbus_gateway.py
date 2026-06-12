@@ -261,34 +261,6 @@ class ModbusRTUOverTCPDriver:
         if self.client:
             self.client.close()
 
-# ---------------------------------------------------------------------------
-# Modbus/TCP (server)
-# ---------------------------------------------------------------------------
-
-
-# def connect_modbus(ip, name, *, log_success=True):
-#     """Block until Modbus/TCP connects."""
-#     while True:
-#         client = ModbusTcpClient(host=ip, port=ADAM_PORT)
-#         if client.connect():
-#             msg = f"[{name}] Connected to ADAM at {ip}"
-#             log.info(msg) if log_success else log.debug(msg)
-#             return client
-#         log.warning("[%s] Failed to connect to ADAM at %s — retrying in 5s", name, ip)
-#         time.sleep(5)
-
-
-# def refresh_modbus_after_idle(device):
-#     """Close and reopen Modbus client after POLL_INTERVAL with no Modbus traffic."""
-#     name = device["name"]
-#     ip = device["ip"]
-#     try:
-#         device["modbus"].close()
-#     except Exception:
-#         pass
-#     device["modbus"] = device["driver"].connect()
-#     log.debug("[%s] Modbus TCP session reopened after idle window", name)
-
 
 # ---------------------------------------------------------------------------
 # TagoTIP (TCP line protocol)
