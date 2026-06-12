@@ -63,13 +63,13 @@ One of the major libraries used in the script is `[pymodbus](https://pymodbus.re
 
 The script supports one or more register points per device. Columns:
 
--`name`: the internal name for the device
--`device_type`: one of the device types defined in the script's encoding section
--`ip`: device IP address
--`port`: modbus port
--`protocol`: network protocol defined in `run_device()`. either 'tcp' or 'rtu_over_tcp'
--`device_id`: device ID. only used for 'rtu_over_tcp' devices (1-6 for Elkor WattsOn)
--`variable`: contains information about variables
+- `name`: the internal name for the device
+- `device_type`: one of the device types defined in the script's encoding section
+- `ip`: device IP address
+- `port`: modbus port
+- `protocol`: network protocol defined in `run_device()`. either 'tcp' or 'rtu_over_tcp'
+- `device_id`: device ID. only used for 'rtu_over_tcp' devices (1-6 for Elkor WattsOn)
+- `variable`: contains information about variables
 
 `variables` format: `variable1:address:count;variable2:address:count...`
 
