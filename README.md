@@ -62,6 +62,7 @@ One of the major libraries used in the script is `[pymodbus](https://pymodbus.re
 ### `pollees.csv` format
 
 The script supports one or more register points per device. Columns:
+
 -`name`: the internal name for the device
 -`device_type`: one of the device types defined in the script's encoding section
 -`ip`: device IP address
