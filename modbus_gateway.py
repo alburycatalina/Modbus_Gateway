@@ -80,6 +80,7 @@ state_lock = threading.Lock()
 # Encoding
 # ---------------------------------------------------------------------------
 
+# Modify device transformations here
 def decode_register_value(registers, device_type):
     """Combine raw Modbus register words into a single value per encoding."""
     if device_type == "elkor_wattsOn":
