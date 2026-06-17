@@ -232,7 +232,7 @@ class ModbusRTUOverTCPDriver:
     """Modbus RTU framed over TCP — serial server devices."""
     def __init__(self, ip, port, device_id):
         self.ip = ip
-        self.port = port          # e.g. 4001, 4002 — varies per serial server FIXME add to csv
+        self.port = port
         self.device_id = device_id  # maps to `slave=` in pymodbus
         self.client = None
 
