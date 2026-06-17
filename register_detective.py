@@ -4,6 +4,64 @@ from pymodbus.client import ModbusTcpClient
 # Declare vars
 IP = "10.21.1.169" # IP of device to investigate 
 PORT = 502 # modbus port
+# PROTOCOL = tcp FIXME make it so that the device protocol is defined here using logic from main gateway
+# apply below classes - should they be abstracted from both scripts?
+# differences: framer = rtu, device_id read_holding_registers
+
+# class ModbusTCPDriver:
+#     """Standard Modbus TCP — your existing ADAM devices."""
+#     def __init__(self, ip, port=502):
+#         self.ip = ip
+#         self.port = port
+#         self.client = None
+
+#     def connect(self):
+#         while True:
+#             self.client = ModbusTcpClient(host=self.ip, port=self.port)
+#             if self.client.connect():
+#                 return
+#             time.sleep(5)
+
+#     def read_registers(self, address, count):
+#         return self.client.read_holding_registers(address=address, count=count)
+
+#     def close(self):
+#         if self.client:
+#             self.client.close()
+
+
+# class ModbusRTUOverTCPDriver:
+#     """Modbus RTU framed over TCP — serial server devices."""
+#     def __init__(self, ip, port, device_id):
+#         self.ip = ip
+#         self.port = port          # e.g. 4001, 4002 — varies per serial server FIXME add to csv
+#         self.device_id = device_id  # maps to `slave=` in pymodbus
+#         self.client = None
+
+#     def connect(self):
+#         from pymodbus.client import ModbusTcpClient
+#         while True:
+#             # framer="rtu" tells pymodbus to use RTU framing over the TCP socket
+#             self.client = ModbusTcpClient(
+#                 host=self.ip,
+#                 port=self.port,
+#                 framer="rtu",
+#             )
+#             if self.client.connect():
+#                 return
+#             time.sleep(5)
+
+#     def read_registers(self, address, count):
+#         # device_id is the RTU slave address
+#         return self.client.read_holding_registers(
+#             address=address,
+#             count=count,
+#             slave=self.device_id,
+#         )
+
+#     def close(self):
+#         if self.client:
+#             self.client.close()
 
 # Function for getting all registers, from 65536
 def read_all_registers(client):
