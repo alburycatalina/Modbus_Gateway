@@ -16,7 +16,7 @@ In the [ADAM utility software](https://www.advantech.com/en-us/support/details/u
 The ADAM-6051 has 12 digital inputs, 2 counter channels, and 2 digital outputs with 2000 VDC isolation. All digital inputs have a latch function and can be used as counter/frequency input channels. All of these are readable over Modbus/TCP on port 502.
 
 ### Serial Servers
-To get connected to a new serial server, plug it into your computer and enure it has power. Then, find out what the default IP is and change your computer's IP to something that matches it's first three digits. When that's done, you should be able to visit the device's IP in your browser and assign it a new IP. Connect the device to the ethernet and reassign your normal IP. 
+To get connected to a new serial server, plug it into your computer and enure it has power. Then, find out what the default IP is and change your computer's IP to something that matches it's first three digits. When that's done, you should be able to visit the device's IP in your browser and assign it a new IP on it's config page. Connect the device to the ethernet and reassign your normal IP. 
 
 ### Quick Network Tips
 * In cmd, run `arp -a` to see the list of devices previously connected to PC. 
