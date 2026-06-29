@@ -1,6 +1,6 @@
 # Mobus Gateway for DAS Devices
 
-This repository hosts a gateway for IoT devices which transmits Modbus/TCP signals to TagoTiP over TCP. [The main gateway script can be found here.](/modbus_gateway.py). The gateway script polls the devices in `pollees.csv` with [the Pymodbuspackage](https://pymodbus.readthedocs.io/en/latest/index.html) and transmits the requested signals to [Tago.io](tago.io) via [TagoTIP over TCP](https://docs.tago.io/docs/tagotip/transports/tcp). 
+This repository hosts a gateway for IoT devices which transmits Modbus/TCP signals to TagoTiP over TCP. [The main gateway script can be found here.](/modbus_gateway.py) The gateway script polls the devices in `pollees.csv` with [the Pymodbuspackage](https://pymodbus.readthedocs.io/en/latest/index.html) and transmits the requested signals to [Tago.io](tago.io) via [TagoTIP over TCP](https://docs.tago.io/docs/tagotip/transports/tcp). 
 
 ## About Devices
 
