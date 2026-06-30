@@ -173,7 +173,7 @@ def parse_register_points(row):
                 "Expected variable:address[:count]"
             )
         points.append({
-            "variable": pieces[0],
+            "variable": pieces[0].lower(),
             "address": int(pieces[1], 0),
             "count": int(pieces[2], 0) if len(pieces) == 3 else 1,
                 })
@@ -232,7 +232,7 @@ class ModbusRTUOverTCPDriver:
     """Modbus RTU framed over TCP — serial server devices."""
     def __init__(self, ip, port, device_id):
         self.ip = ip
-        self.port = port          # e.g. 4001, 4002 — varies per serial server FIXME add to csv
+        self.port = port          # e.g. 4001, 4002 — varies per serial server
         self.device_id = device_id  # maps to `slave=` in pymodbus
         self.client = None
 
