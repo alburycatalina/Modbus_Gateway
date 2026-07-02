@@ -18,6 +18,15 @@ The ADAM-6051 has 12 digital inputs, 2 counter channels, and 2 digital outputs w
 ### Serial Servers
 To get connected to a new serial server, plug it into your computer and enure it has power. Then, find out what the default IP is and change your computer's IP to something that matches it's first three digits. When that's done, you should be able to visit the device's IP in your browser and assign it a new IP. Connect the device to the ethernet and reassign your normal IP. 
 
+These devices use RTU over TCP rather than just straight up TCP. They connect to devices that don't have their own ethernet connectivity, icnluded below
+
+
+#### Elkor WattsOn
+
+These devices are used to report on wattage. They can be wired in serial accross three 6 devices (`device_id`) in `pollees.csv` and can have up to three channels that report on voltage and amps. 
+
+[Elkor WattsOn Manual](https://www.elkor.net/pdfs/WattsOn-Mark_II_Manual_Complete.pdf). 
+
 ### Quick Network Tips
 * In cmd, run `arp -a` to see the list of devices previously connected to PC. 
 * In cmd, `for /l %i in (1,1,254) do @ping 10.21.1.%i -n 1 -w 100 | find "Reply"` for all devices on network
