@@ -1,9 +1,29 @@
 # Import modbus library
 from pymodbus.client import ModbusTcpClient
+from pymodbus import FramerType
+from pymodbus.exceptions import ConnectionException, ModbusException
 
 # Declare vars
-IP = "10.21.1.169" # IP of device to investigate 
-PORT = 502 # modbus port
+IP = ""  # IP of device to investigate
+PORT = ""  # modbus port
+DEVICE_ID = ""
+
+# Connection type: "tcp" for standard Modbus TCP, "rtu_over_tcp" for RTU framing
+# over a raw TCP socket (e.g. GW312 serial server in transparent/bridge mode)
+CONNECTION_TYPE = "rtu_over_tcp"  # "tcp" or "rtu_over_tcp"
+
+FRAMER_MAP = {
+    "tcp": FramerType.SOCKET,
+    "rtu_over_tcp": FramerType.RTU,
+}
+
+
+def make_client(connection_type):
+    """Build a ModbusTcpClient with the framer appropriate to the connection type."""
+    if connection_type not in FRAMER_MAP:
+        raise ValueError(f"Unknown connection type: {connection_type}")
+    return ModbusTcpClient(host=IP, port=PORT, framer=FRAMER_MAP[connection_type])
+
 
 # Function for getting all registers, from 65536
 def read_all_registers(client):
@@ -11,27 +31,26 @@ def read_all_registers(client):
     registers = {}
     for start in range(0, 65536, 125):
         count = min(125, 65536 - start)
-        result = client.read_holding_registers(address=start, count=count)
+        result = client.read_holding_registers(address=start, count=count, device_id=DEVICE_ID)
         if not result.isError():
             for i, value in enumerate(result.registers):
                 registers[start + i] = value
     return registers
 
-# Establish connection to client 
-client = ModbusTcpClient(host=IP, port=PORT)
 
-# Scan registers twice and see what the difference between them is 
+# Establish connection to client
+client = make_client(CONNECTION_TYPE)
+
+# Scan registers twice and see what the difference between them is
 # Run script, make device send signal (ex: close the circuit on a count port) and then hit enter
 # If there is a register reporting, the value should have changed and it will print out
 if client.connect():
+    print(f"Connected using '{CONNECTION_TYPE}' framing ({FRAMER_MAP[CONNECTION_TYPE]})")
     print("First scan...")
     scan_1 = read_all_registers(client)
-
     input("\nFirst scan complete. Press Enter to start second scan...")
-
     print("Second scan...")
     scan_2 = read_all_registers(client)
-
     client.close()
 
     # Compare the two scans
