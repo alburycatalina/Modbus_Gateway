@@ -89,9 +89,9 @@ def decode_register_value(registers, device_type):
     if device_type == "adam6051":
         # 32 bit high endian rollover bit
         return registers[0] + registers[1] * 65536
-    if device_type == "adam6017":
+    if device_type == "adam6017": 
         # 16 bit analog input with single register
-        return (registers[0] / 65535) * 10 
+        return (registers[0] / 65535) * 20 
     # Default: 16 bit
     return registers[0]
 
