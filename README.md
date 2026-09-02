@@ -18,7 +18,7 @@ The ADAM-6051 has 12 digital inputs, 2 counter channels, and 2 digital outputs w
 ### Serial Servers
 To get connected to a new serial server, plug it into your computer and enure it has power. Then, find out what the default IP is and change your computer's IP to something that matches it's first three digits. When that's done, you should be able to visit the device's IP in your browser and assign it a new IP. Connect the device to the ethernet and reassign your normal IP. 
 
-These devices use RTU over TCP rather than just straight up TCP. They connect to devices that don't have their own ethernet connectivity, icnluded below
+These devices use RTU over TCP rather than just straight up TCP. They connect to devices that don't have their own ethernet connectivity, included below
 
 
 #### Elkor WattsOn

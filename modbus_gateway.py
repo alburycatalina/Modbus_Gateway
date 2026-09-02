@@ -30,6 +30,10 @@ if not AUTH_HASH:
 ADAM_PORT = 502
 POLL_INTERVAL = 600 # poll every 10 mins
 
+# When true, no data is actually sent to TagoIO. Frames are logged/printed instead
+# so you can see exactly what would be pushed. Enable with DRY_RUN=1 (or true/yes).
+DRY_RUN = os.getenv("DRY_RUN", "false").strip().lower() in ("1", "true", "yes")
+
 
 def _float_env(name: str, default: float) -> float:
     raw = os.getenv(name)
@@ -72,6 +76,13 @@ _formatter = logging.Formatter(
 _file_handler = logging.FileHandler(LOG_FILE)
 _file_handler.setFormatter(_formatter)
 log.addHandler(_file_handler)
+
+if DRY_RUN:
+    # Also echo to stdout in dry-run so it's easy to watch live without tailing the log file.
+    _stream_handler = logging.StreamHandler()
+    _stream_handler.setFormatter(_formatter)
+    log.addHandler(_stream_handler)
+    log.warning("DRY RUN MODE — no data will be sent to TagoIO. Frames will be logged only.")
 
 # Protects shared JSON state written from multiple device threads.
 state_lock = threading.Lock()
@@ -116,6 +127,9 @@ def load_last_values_state(filepath):
 
 
 def save_last_values_state(filepath, state):
+    if DRY_RUN:
+        # Don't persist deltas learned during a dry run — they weren't real pushes.
+        return
     temp_path = f"{filepath}.tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, sort_keys=True)
@@ -268,7 +282,10 @@ class ModbusRTUOverTCPDriver:
 
 
 def connect_tago(name="", *, log_success=True):
-    """Block until Tago TCP connects."""
+    """Block until Tago TCP connects. In DRY_RUN, returns None immediately (no socket)."""
+    if DRY_RUN:
+        log.info("[%s] [dry-run] Skipping real TagoIO connection", name)
+        return None
     attempt = 0
     while True:
         attempt += 1
@@ -299,7 +316,14 @@ def connect_tago(name="", *, log_success=True):
 
 
 def send_frame(sock, frame, ack_timeout=8):
-    """Send one line-terminated frame; return ACK text or empty string on recv timeout."""
+    """
+    Send one line-terminated frame; return ACK text or empty string on recv timeout.
+    In DRY_RUN (sock is None), nothing is sent over the wire — the frame is logged
+    and a simulated "OK" ack is returned so the rest of the loop behaves normally.
+    """
+    if DRY_RUN:
+        log.info("[dry-run] Would send: %s", frame.strip())
+        return "OK (simulated)"
     sock.sendall(frame.encode())
     previous_timeout = sock.gettimeout()
     try:
@@ -353,7 +377,13 @@ def maintain_tago_socket_during_idle(device, total_sleep_seconds):
     Sleep total_sleep_seconds while keeping TagoTIP alive:
     - PING often enough to beat ~5s idle limit.
     - New TCP session before ~10s connection TTL (Free/Starter).
+    In DRY_RUN this just sleeps out the interval — send_frame/reconnect_tago already
+    no-op the real network calls, so we don't need to hammer the loop with fast polling.
     """
+    if DRY_RUN:
+        time.sleep(total_sleep_seconds)
+        return
+
     deadline = time.time() + total_sleep_seconds
     serial = device["serial"]
     name = device["name"]
