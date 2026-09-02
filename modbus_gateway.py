@@ -28,7 +28,7 @@ if not AUTH_HASH:
     raise RuntimeError("Missing AUTH_HASH in environment/.env")
 
 ADAM_PORT = 502
-POLL_INTERVAL = 60
+POLL_INTERVAL = 600 # poll every 10 mins
 
 
 def _float_env(name: str, default: float) -> float:
@@ -254,7 +254,7 @@ class ModbusRTUOverTCPDriver:
         return self.client.read_holding_registers(
             address=address,
             count=count,
-            slave=self.device_id,
+            device_id =self.device_id,
         )
 
     def close(self):
