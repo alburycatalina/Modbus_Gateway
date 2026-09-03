@@ -95,6 +95,9 @@ name,device_type,ip,serial,port,protocol,device_id,variable
 device1,adam6051,0.0.0.0,serialnumber1,502,tcp,NA,countfreq0:24:2;countfreq1:26:2
 device2,adam6017,0.0.0.0,serialnumber2,502,tcp,NA,volts:7:1
 ```
+### Testing Mode
+Set DRY_RUN = "True" to implement testing mode. It will poll devices and print the corresponding Tago frames to the console but will not send those frames to Tago. Turn on when running from local computer instead of the server. 
+
 
 ### About Modbus Address Notation
 The ADAM manual works with the full 5 digit modbus addresses. The Pymodbus package uses a raw, zero based address (multiply by 40000 and add one to the last digit of each number to convert to 5-digit address). 4xxx registers are reserved for read/write output or holding registers. These are used in either decimal or binary in the code. For example:
