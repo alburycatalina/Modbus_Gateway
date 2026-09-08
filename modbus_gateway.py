@@ -32,7 +32,7 @@ POLL_INTERVAL = 600 # poll every 10 mins
 
 # When true, no data is actually sent to TagoIO. Frames are logged/printed instead
 # so you can see exactly what would be pushed. Enable with DRY_RUN=1 (or true/yes).
-DRY_RUN = os.getenv("DRY_RUN", "false").strip().lower() in ("1", "true", "yes")
+DRY_RUN = os.getenv("DRY_RUN", "true").strip().lower() in ("1", "true", "yes")
 
 
 def _float_env(name: str, default: float) -> float:
@@ -58,7 +58,7 @@ LAST_VALUES_FILE = "last_values.json"
 
 POLL_REGISTER_ADDRESS = 0x0018
 POLL_REGISTER_COUNT = 1
-TAGO_VARIABLE_NAME = "countfreq"
+TAGO_SENSOR_NAME = "countfreq" #changed
 
 RECONNECT_BACKOFF_BASE = 1
 RECONNECT_BACKOFF_CAP = 30
@@ -165,13 +165,13 @@ def parse_str(value, default):
     return text
 
 # parse register points from pollees sheet
-def parse_register_points(row):
-    # registers=variable:address[:count[:rollover_bits]];...
-    text = (row.get("variable") or "").strip()
+def parse_register_points(row): #changed
+    # registers=sensor:address[:count[:rollover_bits]];...
+    text = (row.get("sensor") or "").strip()
     if not text:
         default_count = parse_int(row.get("register_count"), POLL_REGISTER_COUNT)
         return [{
-            "variable": (row.get("variable_name") or TAGO_VARIABLE_NAME).strip(),
+            "sensor": (row.get("sensor_name") or TAGO_SENSOR_NAME).strip(),
             "address": parse_int(row.get("register_address"), POLL_REGISTER_ADDRESS),
             "count": default_count,
         }]
@@ -184,10 +184,10 @@ def parse_register_points(row):
         if len(pieces) not in (2, 3):
             raise ValueError(
                 f"Invalid registers entry '{part}'. "
-                "Expected variable:address[:count]"
+                "Expected sensor:address[:count]"
             )
         points.append({
-            "variable": pieces[0].lower(),
+            "sensor": pieces[0].lower(),
             "address": int(pieces[1], 0),
             "count": int(pieces[2], 0) if len(pieces) == 3 else 1,
                 })
@@ -468,9 +468,9 @@ def run_device(device):
         serial_state = state.get(serial, {})
         if isinstance(serial_state, dict):
             for point in register_points:
-                value = serial_state.get(point["variable"])
+                value = serial_state.get(point["sensor"]) #changed
                 if isinstance(value, int):
-                    device["last_values"][point["variable"]] = value
+                    device["last_values"][point["sensor"]] = value #changed
 
     first_modbus_poll = True
 
@@ -534,7 +534,7 @@ def run_device(device):
                 if reg_result is None or reg_result.isError():
                     log.warning(
                         "[%s] Modbus read failed for %s (address=%s, count=%s) — reconnecting Modbus...",
-                        name, point["variable"], point["address"], point["count"],
+                        name, point["sensor"], point["address"], point["count"], #changed
                     )
                     client.close()
                     device["modbus"] = device["driver"].connect()
@@ -542,14 +542,14 @@ def run_device(device):
                     break
 
                 value = decode_register_value(reg_result.registers, device["device_type"])
-                variable_name = point["variable"]
-                previous_value = device["last_values"].get(variable_name)
+                sensor_name = point["sensor"] #changed
+                previous_value = device["last_values"].get(sensor_name)
 
                 encoding = point.get("encoding", "uint16") #uint16 as default if no encoding provided
 
                 delta = compute_delta(value, previous_value)
 
-                frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}:={value}]\n"
+                frame = f"PUSH|{AUTH_HASH}|{serial}|[{sensor_name}:={value}]\n"
                 try:
                     ack = send_frame(tago_socket, frame, ack_timeout=8)
                 except (ConnectionResetError, BrokenPipeError, OSError) as e:
@@ -561,7 +561,7 @@ def run_device(device):
         
 
                 if device["device_type"] != "adam6017": # do not compute deltas when analog input 16 as in 6017
-                    delta_frame = f"PUSH|{AUTH_HASH}|{serial}|[{variable_name}_delta:={delta}]\n"
+                    delta_frame = f"PUSH|{AUTH_HASH}|{serial}|[{sensor_name}_delta:={delta}]\n"
                     try:
                         delta_ack = send_frame(tago_socket, delta_frame, ack_timeout=8)
                     except (ConnectionResetError, BrokenPipeError, OSError) as e:
@@ -571,9 +571,9 @@ def run_device(device):
                     if delta_ack and "ERR" in delta_ack:
                         raise ConnectionAbortedError(f"TagoIO returned error ACK: {delta_ack}")
 
-                device["last_values"][variable_name] = value
+                device["last_values"][sensor_name] = value
                 with state_lock:
-                    state.setdefault(serial, {})[variable_name] = value
+                    state.setdefault(serial, {})[sensor_name] = value
                     save_last_values_state(LAST_VALUES_FILE, state)
             else:
                 device["consecutive_errors"] = 0
