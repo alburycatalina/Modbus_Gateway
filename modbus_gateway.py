@@ -32,7 +32,7 @@ POLL_INTERVAL = 600 # poll every 10 mins
 
 # When true, no data is actually sent to TagoIO. Frames are logged/printed instead
 # so you can see exactly what would be pushed. Enable with DRY_RUN=1 (or true/yes).
-DRY_RUN = os.getenv("DRY_RUN", "true").strip().lower() in ("1", "true", "yes")
+DRY_RUN = os.getenv("DRY_RUN", "false").strip().lower() in ("1", "true", "yes")
 
 
 def _float_env(name: str, default: float) -> float:
@@ -58,7 +58,7 @@ LAST_VALUES_FILE = "last_values.json"
 
 POLL_REGISTER_ADDRESS = 0x0018
 POLL_REGISTER_COUNT = 1
-TAGO_SENSOR_NAME = "countfreq" #changed
+TAGO_SENSOR_NAME = "countfreq"
 
 RECONNECT_BACKOFF_BASE = 1
 RECONNECT_BACKOFF_CAP = 30
@@ -166,7 +166,7 @@ def parse_str(value, default):
     return text
 
 # parse register points from pollees sheet
-def parse_register_points(row): #changed
+def parse_register_points(row):
     # registers=sensor:address[:count[:rollover_bits]];...
     text = (row.get("sensor") or "").strip()
     if not text:
@@ -469,9 +469,9 @@ def run_device(device):
         serial_state = state.get(serial, {})
         if isinstance(serial_state, dict):
             for point in register_points:
-                value = serial_state.get(point["sensor"]) #changed
+                value = serial_state.get(point["sensor"])
                 if isinstance(value, int):
-                    device["last_values"][point["sensor"]] = value #changed
+                    device["last_values"][point["sensor"]] = value 
 
     first_modbus_poll = True
 
@@ -535,7 +535,7 @@ def run_device(device):
                 if reg_result is None or reg_result.isError():
                     log.warning(
                         "[%s] Modbus read failed for %s (address=%s, count=%s) — reconnecting Modbus...",
-                        name, point["sensor"], point["address"], point["count"], #changed
+                        name, point["sensor"], point["address"], point["count"],
                     )
                     client.close()
                     device["modbus"] = device["driver"].connect()
@@ -543,7 +543,7 @@ def run_device(device):
                     break
 
                 value = decode_register_value(reg_result.registers, device["device_type"])
-                sensor_name = point["sensor"] #changed
+                sensor_name = point["sensor"]
                 previous_value = device["last_values"].get(sensor_name)
 
                 encoding = point.get("encoding", "uint16") #uint16 as default if no encoding provided
