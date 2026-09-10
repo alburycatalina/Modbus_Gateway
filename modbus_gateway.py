@@ -30,6 +30,7 @@ if not AUTH_HASH:
 ADAM_PORT = 502
 POLL_INTERVAL = 600 # poll every 10 mins
 
+# Dry run mode
 # When true, no data is actually sent to TagoIO. Frames are logged/printed instead
 # so you can see exactly what would be pushed. Enable with DRY_RUN=1 (or true/yes).
 DRY_RUN = os.getenv("DRY_RUN", "false").strip().lower() in ("1", "true", "yes")
